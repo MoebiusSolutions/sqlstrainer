@@ -24,4 +24,4 @@ Contributors:
 
 Douglas MacDougall <douglas.macdougall@moesol.com>
 
-see @Authors
+see @AUTHORS

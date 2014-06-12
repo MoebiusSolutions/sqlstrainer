@@ -1,1 +1,2 @@
-__author__ = 'dmacd'
+__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
+
