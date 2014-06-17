@@ -20,7 +20,7 @@ sqlstrainer
 .. toctree::
     :maxdepth: 2
 
-    source/dbmap
+    source/sqlstrainer
 
 Indices and tables
 ==================

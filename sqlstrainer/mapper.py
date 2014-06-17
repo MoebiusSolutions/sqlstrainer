@@ -6,14 +6,13 @@
 .. autoclass:: ColumnEntry
     :members:
 """
-__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
-
-from sqlalchemy import inspect
-from sqlalchemy.orm.mapper import Mapper
+from sqlalchemy import inspect, orm
 from sqlalchemy.orm.attributes import InstrumentedAttribute
-from sqlalchemy.orm.properties import ColumnProperty, RelationshipProperty
+from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.ext.hybrid import hybrid_property
 import re
+
+__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 
 class NoPathAvailable(Exception):
@@ -35,14 +34,8 @@ class DBMap():
 
     Helper class that holds SQLAlchemy ORM relationship and column information in lookup tables.
 
-    Instantiate with a dictionary of mappers as key and any truthy value.
-    If you don't build your own mapper registry, use sqlalchemy's.
-
-    .. code-block:: python
-
-        import sqlalchemy
-        dbmap = DBMap(sqlalchemy.orm._mapper_registry)
-
+    Instantiate with a dictionary of {mapper: is_primary}.
+    By default, uses :data:`sqlalchemy.orm._mapper_registry`.
     """
 
     _relations = None
@@ -56,7 +49,9 @@ class DBMap():
         or table_name.column_name
     """
 
-    def __init__(self, registry):
+    def __init__(self, registry=None):
+        if registry is None:
+            registry = orm._mapper_registry
         self._relations = dict()
         self._columns = dict()
         for mapper, primary in registry.items():
@@ -85,7 +80,7 @@ class DBMap():
         return col
 
     def get(self, item, default=None):
-        """get a unique ColumnEntry using :meth:`find_columns`"""
+        """get a unique ColumnEntry using :meth:`.find_columns`"""
         col = self.find_columns(item)
         if col is not None and len(col) == 1:
             return col[0]
@@ -121,12 +116,11 @@ class DBMap():
     @staticmethod
     def to_mapper(obj):
         """takes a mapper, model or relationship and returns the target mapper"""
-        if not isinstance(obj, Mapper):
-            if isinstance(obj, InstrumentedAttribute) and isinstance(obj.property, RelationshipProperty):
-                return obj.property.mapper
-            obj = inspect(obj)
-            if not obj.is_mapper:
-                raise TypeError('object must be a mapper, model or relationship')
+        obj = inspect(obj)
+        if obj.is_attribute:
+            obj = getattr(obj.property, 'mapper', obj)
+        if not obj.is_mapper:
+            raise TypeError('object must be a mapper, model or relationship')
         return obj
 
     def shortest_path(self, from_obj, to_obj):
@@ -147,7 +141,29 @@ class DBMap():
             return None
 
         to_obj = self.to_mapper(to_obj)
-        return self._shortestPath(relations, to_obj)
+
+#        return self._shortestPath(relations, to_obj)
+
+        if path is None:
+            path = []
+        # mapper: relationship
+        current = dict((m, r) for r, m in relations.items())
+        found = current.get(find)
+
+        if found:
+            path.append(found)
+            return path
+        shortest_path = []
+        for r, m in relations.items():
+            nest = self._relations.get(m)
+            if not nest:
+                return None
+            p = self._shortestPath(nest, find, path + [r])
+            if p is not None:
+                shortest_path.append(p)
+        if shortest_path:
+            return sorted(shortest_path, key=lambda sp: len(sp))[0]
+        return None
 
     @classmethod
     def first_relation(cls, relations, find):

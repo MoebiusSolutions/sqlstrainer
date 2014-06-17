@@ -1,7 +1,6 @@
-"""SQLStrainer
-===========
+"""SQLStrainer filters SQLAlchemy Query objects based any column or hybrid property of a related model.
 
-SQLStrainer filters SQLAlchemy Query objects based any column or hybrid property of a related model.
+..  code::
 
     from sqlstrainer import strainer
     strainer = sqlstrainer(mydb)
@@ -9,9 +8,19 @@ SQLStrainer filters SQLAlchemy Query objects based any column or hybrid property
 
 
 mapper
------
+------
 
 .. automodule:: sqlstrainer.mapper
+
+strainer
+--------
+
+.. automodule:: sqlstrainer.strainer
+
+handler
+-------
+
+.. automodule:: sqlstrainer.handler
 
 """
 

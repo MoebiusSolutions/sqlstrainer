@@ -1,0 +1,5 @@
+sqlstrainer
+===========
+
+.. automodule:: sqlstrainer
+
