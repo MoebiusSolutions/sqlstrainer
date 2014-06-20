@@ -7,7 +7,7 @@ SQLStrainer filters SQLAlchemy Query objects based on any column or hybrid prope
 Currently In Work
 =================
 
-Project currently under active develop. (pre-alpha) Not at initial release state yet.
+Project currently under active development. (pre-alpha)
 
 The code, docstrings and architecture are still in flux.
 
