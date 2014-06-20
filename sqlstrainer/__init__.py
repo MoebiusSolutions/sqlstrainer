@@ -22,6 +22,11 @@ handler
 
 .. automodule:: sqlstrainer.handler
 
+match
+-------
+
+.. automodule:: sqlstrainer.match
+
 """
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'

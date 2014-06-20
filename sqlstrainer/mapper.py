@@ -54,9 +54,7 @@ class DBMap():
             registry = orm._mapper_registry
         self._relations = dict()
         self._columns = dict()
-        for mapper, primary in registry.items():
-            if not primary:
-                continue
+        for mapper, _ in filter(lambda (_, is_primary): is_primary, registry.iteritems()):
             self._relations[mapper] = dict((rprop.class_attribute, rprop.mapper) for rprop in mapper.relationships)
             model = mapper.entity
             for name, o in mapper.all_orm_descriptors.items():
@@ -123,6 +121,33 @@ class DBMap():
             raise TypeError('object must be a mapper, model or relationship')
         return obj
 
+    def all_relatives(self, obj):
+        """Retrieves all decendants of a mapper or model
+
+        >>> dbmap.all_relatives(Base)
+        {
+            Mapper: [ [Rel1, Rel2], [Rel3, Rel4, Rel5] ],
+            ...
+        }
+        # Base->Rel1->Rel2->Mapper, Base->Rel3->Rel4->Rel5->Mapper
+
+        :param obj: the parent model
+        :type obj: Declarative | Mapper
+        :return: list of decendants
+        """
+
+        relatives = {}
+        stack = [(self.to_mapper(obj), [])]
+        while stack:
+            parent, root = stack.pop()
+            children = self._relations.get(parent)
+            for relationship, mapper in children.iteritems():
+                path = root + [relationship]
+                if mapper not in relatives:
+                    stack.append((mapper, path))
+                relatives.setdefault(mapper, []).append(path)
+        return relatives
+
     def shortest_path(self, from_obj, to_obj):
         """Finds the shortest path from one table to another
 
@@ -135,41 +160,16 @@ class DBMap():
          :return: a list of relationships which can be passed to `Query.join`
          :rtype: list
          """
-        from_obj = self.to_mapper(from_obj)
-        relations = self._relations.get(from_obj)
-        if relations is None:
-            return None
-
-        to_obj = self.to_mapper(to_obj)
-
-#        return self._shortestPath(relations, to_obj)
-
-        if path is None:
-            path = []
-        # mapper: relationship
-        current = dict((m, r) for r, m in relations.items())
-        found = current.get(find)
-
-        if found:
-            path.append(found)
-            return path
-        shortest_path = []
-        for r, m in relations.items():
-            nest = self._relations.get(m)
-            if not nest:
-                return None
-            p = self._shortestPath(nest, find, path + [r])
-            if p is not None:
-                shortest_path.append(p)
-        if shortest_path:
-            return sorted(shortest_path, key=lambda sp: len(sp))[0]
-        return None
+        relatives = self.all_relatives(from_obj)
+        routes = relatives.get(self.to_mapper(to_obj))
+        if routes:
+            return sorted(routes, key=lambda sp: len(sp))[0]
 
     @classmethod
     def first_relation(cls, relations, find):
         """takes a list of relations and finds the first one that matches
 
-        :param relations: a list of :class:`sqlalchemy.orm.properties.RelationshipProperty`
+        :param relations: a list of relationships
         :param find: the relation to find (Mapper, Model, Relationship)
         :return: first relationship to match
         """
@@ -179,7 +179,7 @@ class DBMap():
             return find
         # handle models or mappers
         find = cls.to_mapper(find)
-        for relationship, mapper in relations.items():
+        for relationship, mapper in relations.iteritems():
             if mapper == find:
                 return relationship
         return None
@@ -220,26 +220,4 @@ class DBMap():
         """
         return self._relations[mapper]
 
-    def _shortest_path(self, relations, find, path=None):
-        """recursively build all paths to the target, return the shortest"""
-        if path is None:
-            path = []
-        # mapper: relationship
-        current = dict((m, r) for r, m in relations.items())
-        found = current.get(find)
-
-        if found:
-            path.append(found)
-            return path
-        shortest_path = []
-        for r, m in relations.items():
-            nest = self._relations.get(m)
-            if not nest:
-                return None
-            p = self._shortestPath(nest, find, path + [r])
-            if p is not None:
-                shortest_path.append(p)
-        if shortest_path:
-            return sorted(shortest_path, key=lambda sp: len(sp))[0]
-        return None
 

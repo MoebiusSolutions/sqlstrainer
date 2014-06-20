@@ -4,10 +4,41 @@
     :members:
 
 """
+from functools import wraps
 from sqlstrainer.mapper import DBMap
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
+
+def _any_to_many(v):
+    if isinstance(v, basestring):
+        yield v
+        return
+    try:
+        for value in iter(v):
+            yield value
+    except TypeError:
+        yield v
+
+
+class StrainTarget(object):
+    """data class
+
+    If you have a User model and an Address model with a home relationship and a work relationship
+    and you wish to search the street field for either you create a StrainTarget with two routes.
+
+    """
+
+    def __init__(self, name, routes):
+        """data class
+
+        `routes` is a list of paths. Each path must terminate at the same model
+
+        :param routes: a list of paths
+        """
+
+        self.name = name
+        self.routes = routes
 
 
 class Strainer(object):
@@ -15,6 +46,7 @@ class Strainer(object):
 
     >>> strainer = Strainer(User)
     """
+    _strict = False
 
     def __init__(self, base, dbmap=None, strict_mode=False):
         """
@@ -30,10 +62,14 @@ class Strainer(object):
             dbmap = DBMap()
         self.dbmap = dbmap
         self.mapper = dbmap.to_mapper(base)
-        self.routes = {}
+        self.groups = {}
         self.hidden = set()
         self.options = {}
-        self.strict = strict_mode
+        self._strict = strict_mode
+
+    @property
+    def strict(self):
+        return self._strict
 
     def hide(self, obj):
         mapper = self.dbmap.to_mapper(obj)
@@ -72,43 +108,29 @@ class Strainer(object):
 
 
         :param data: list of data to filter on
+        :raises Error: when strict mode is enabled
         """
 
+
         for item in data:
-            name = item.get('name')
-            if not name:
-                if self.strict:
-                    raise AttributeError('name attribute missing')
-                else:
-                    continue
-            column = self.dbmap.get(name)
-            if not column:
-                if self.strict:
-                    raise AttributeError('Unknown column name: "{0}"'.format(name))
-                else:
-                    continue
-            filter = item.get('filter')
-            if not filter:
-                if self.strict:
-                    raise AttributeError('filter attribute missing')
-                else:
-                    continue
-            value = item.get('value')
-            if isinstance(value, basestring):
-                value = [value]
             try:
-                _ = iter(value)
-            except TypeError:
-                value = [value]
+                name = item['name']
+                column = self.dbmap[name]
+                filter_name = item.get('filter', 'contains')
+                column_filter = self.filters[filter_name]
+                v = item['value']
+                values = list(_any_to_many(v))
 
-                            
-            """lookup name"""
-            """iterate values"""
-            """execute filter"""
-            """build join list"""
 
-    def apply(self, data):
-        raise NotImplemented
+            except KeyError as e:
+                if self._strict:
+                    raise e
+                else:
+                    continue
+
+    def apply(self, query):
+        return query.filter(*self.filter).join(*self.join)
+
 
 class StrainerMixin(object):
 
@@ -117,19 +139,35 @@ class StrainerMixin(object):
         strainer.strain(data)
         return strainer.apply(query)
 
-column_handlers = {}
+
+# class StrainBeMeta(type):
+#     _registry = {}
+#
+#     def __new__(mcs, name, bases, dct):
+#         o = super(StrainBeMeta, mcs).__new__(mcs, name, bases, dct)
+#         StrainBeMeta._registry[name] = o
+#         return o
+#
+#
+# class ColumnStrainer(object):
+#     """
+#
+#     """
+#     __metaclass__ = StrainBeMeta
+#
+#     def __init__(self, column):
+#         pass
+
+class ColumnStrainerFactory(object):
+
+    @classmethod
+    def create(cls, column_type='*'):
+        if column_type == '*':
+            default = True
 
 
-class ColumnStrainer(object):
-    """
-
-    """
-
-    def __init__(self, column):
-        self.handler = column_handlers.get(column.type, column_handlers['DEFAULT'])
-
-
-class TextStrainer(ColumnStrainer):
+#class TextStrainer(ColumnStrainer):
+class TextStrainer(object):
     """
 
     """
@@ -139,3 +177,52 @@ class TextStrainer(ColumnStrainer):
          ('not like', lambda x, y: x.ilike('%{0}%'.format(y))),
          ('is', lambda x, y: x.is_(y)),
          ('is not', lambda x, y: x.isnot(y))))
+
+
+registry = {}
+
+
+class TypeStrainer(object):
+    _column_type = None
+    _actions = None
+
+    def __init__(self, column_type, actions):
+        self._column_type = column_type
+        self._actions = actions
+
+    def strain(self, action, *args):
+        return self._actions[action](*args)
+
+    @property
+    def column_type(self):
+        return self._column_type
+
+    @property
+    def actions(self):
+        return self._actions
+    #filter_for('all')
+    def contains(self):
+        return False
+
+#DefaultStrainer = TypeStrainer('all', [DefaultStrainer.contains, DefaultStrainer.notcontains])
+
+
+def filter_for(data_type, action=None):
+    """Create decorator
+
+    :param data_type: column type such as string, int,
+    :type type: str
+    :return: decorator
+    """
+
+    def decorator(func):
+        name = action if action is not None else func.func_name
+        registry.setdefault(data_type, {})[name] = func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
