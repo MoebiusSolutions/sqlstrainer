@@ -4,9 +4,11 @@
     :members:
 
 """
-from functools import wraps
-from sqlstrainer.mapper import DBMap
+import itertools
+from sqlalchemy import inspect
 
+from sqlstrainer.mapper import DBMap
+from sqlstrainer.match import column_matcher
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 
@@ -21,24 +23,42 @@ def _any_to_many(v):
         yield v
 
 
-class StrainTarget(object):
-    """data class
+class Group(object):
+    name = None
+    base = None
+    _paths = None
+    _include = None
+    _exclude = None
+    flags = None
 
-    If you have a User model and an Address model with a home relationship and a work relationship
-    and you wish to search the street field for either you create a StrainTarget with two routes.
+    def __init__(self, base, name=None):
+        self.base = base
+        self.name = name if name else getattr(base, '__name__', 'Other')
+        self._paths = []
+        self._include = []
+        self._exclude = []
 
-    """
+    @property
+    def exclude(self):
+        for group in self.all:
+            for column in group._exclude:
+                yield column
 
-    def __init__(self, name, routes):
-        """data class
+    @property
+    def all(self):
+        stack = []
+        stack.append(self)
+        while stack:
+            group = stack.pop()
+            yield group
+            for child in reversed(group._include):
+                stack.append(child)
 
-        `routes` is a list of paths. Each path must terminate at the same model
 
-        :param routes: a list of paths
-        """
-
-        self.name = name
-        self.routes = routes
+_logical_operations = {
+    'any': lambda x, y: x | y,
+    'all': lambda x, y: x & y,
+}
 
 
 class Strainer(object):
@@ -47,37 +67,73 @@ class Strainer(object):
     >>> strainer = Strainer(User)
     """
     _strict = False
+    _filters = None
 
-    def __init__(self, base, dbmap=None, strict_mode=False):
+    restrictive = True
+
+    def __init__(self, base, dbmap=None, strict=False):
         """
         :param base: base entity - all joins originate from here
         :type base: Declarative or Mapper
         :param dbmap: DBMap (if empty, a default DBMap will be created)
         :type dbmap: :class:`sqlstrainer.mapper.DBMap`
-        :param strict_mode: Raises errors when true, skips when false
-        :type strict_mode: bool
+        :param strict: Strict Mode : errors raise exceptions, default skip errors
+        :type strict: bool
         """
 
         if dbmap is None:
             dbmap = DBMap()
-        self.dbmap = dbmap
-        self.mapper = dbmap.to_mapper(base)
-        self.groups = {}
-        self.hidden = set()
+        self._dbmap = dbmap
+
+        self._group = Group(dbmap.to_mapper(base))
+
         self.options = {}
-        self._strict = strict_mode
+        self._strict = strict
+        self._filters = None
+
+    @property
+    def columns(self):
+        mappers = set()
+        exclude_objs = set()
+        for group in self.group.all:
+            mappers.add(group.base)
+            exclude_objs.update(group.exclude)
+            for path in group.paths:
+                target = self._dbmap.to_mapper(path[-1])
+                mappers.add(target)
+        exclude = set()
+        for obj in exclude_objs:
+            if isinstance(obj, basestring):
+                if '.' in obj:
+                    column = self._dbmap.get(obj)
+                    if column is not None:
+                        exclude.add(column)
+                else:
+                    mapper = self._dbmap.get_mapper(obj)
+                    for name, column in self._dbmap.columns_of(mapper):
+                        exclude.add(column)
+            else:
+                mapper = self._dbmap.to_mapper(obj)
+                if getattr(mapper, 'is_mapper', False):
+                    for name, column in self._dbmap.columns_of(mapper):
+                        exclude.add(column)
+
+        columns = set()
+        for mapper in mappers:
+            for name, column in self._dbmap.columns_of(mapper):
+                columns.add(column)
+
+        return columns - exclude
+
+
+    @property
+    def group(self):
+        return self._group
 
     @property
     def strict(self):
+        """Strict Mode : when true, errors raise exceptions, otherwise skip errors"""
         return self._strict
-
-    def hide(self, obj):
-        mapper = self.dbmap.to_mapper(obj)
-        self.hidden.add(mapper)
-
-    def unhide(self, obj):
-        mapper = self.dbmap.to_mapper(obj)
-        self.hidden.remove(mapper)
 
     def add_path(self, *path):
         path = list(path)
@@ -98,131 +154,69 @@ class Strainer(object):
         data format::
 
             [
-             { 'name': 'column_name1', 'filter': 'startswith', 'value': ['a','b'] },
-             { 'name': 'column_name2', 'filter': 'less_than', 'value': 37 }
+             { 'name': 'column_name1', 'action': 'startswith', 'value': ['a','b'], 'find': 'any' },
+             { 'name': 'column_name2', 'action': 'lt', 'value': 37 }
             ]
 
-        `value` can be either a single value or multiple values.
-        By default, each value will be filtered by logical OR
-        separate columns will be filtered by logical AND
+        * **name: Column Name**
 
+        * action: Filter Operation [Default = `contains`]
+
+        * value: Search Value(s)  - can be either a single value or multiple values.
+
+        * find: Match on Any or All [Default = `any`]  - must match ANY value or ALL values
+
+        **Required** - bold entries are required and have no default
+        ** value ** - required for most
 
         :param data: list of data to filter on
         :raises Error: when strict mode is enabled
         """
-
-
+        self._filters = []
         for item in data:
             try:
                 name = item['name']
-                column = self.dbmap[name]
-                filter_name = item.get('filter', 'contains')
-                column_filter = self.filters[filter_name]
-                v = item['value']
-                values = list(_any_to_many(v))
+                column = self._dbmap[name]
+                if column in self.group.exclude or name in self.group.exclude:
+                    raise KeyError(name)
+                action = item.get('action', 'contains')
+                column_filter = column_matcher(column, action)
+                value = item.get('value', None)
+                if value is None:
+                    f = column_filter(column, None)
+                else:
+                    logic_op = _logical_operations[item.get('find', 'any').lower()]
+                    f = reduce(logic_op, (column_filter(column, x) for x in _any_to_many(value)))
+                self._filters.append(f)
 
-
-            except KeyError as e:
+            except Exception as e:
                 if self._strict:
                     raise e
                 else:
                     continue
 
     def apply(self, query):
-        return query.filter(*self.filter).join(*self.join)
+        if not self._filters:
+            return query
+
+        if self.restrictive:
+            return query.filter(*self._filters).join(*self.join)
+
+        return query.filter(reduce(_logical_operations['any'], self._filters)).outerjoin(*self.join).distinct()
 
 
 class StrainerMixin(object):
+    """SQLStrainer Mixin - Adds a SQLStrainer instance to Declarative classes."""
+
+    @property
+    def strainer(self):
+        strainer = getattr(self, '_strainer', None)
+        if strainer is None:
+            strainer = Strainer(self.__class__)
+            setattr(self, '_strainer', strainer)
+        return strainer
 
     def strain(self, query, data):
-        strainer = Strainer(self.__class__)
-        strainer.strain(data)
-        return strainer.apply(query)
-
-
-# class StrainBeMeta(type):
-#     _registry = {}
-#
-#     def __new__(mcs, name, bases, dct):
-#         o = super(StrainBeMeta, mcs).__new__(mcs, name, bases, dct)
-#         StrainBeMeta._registry[name] = o
-#         return o
-#
-#
-# class ColumnStrainer(object):
-#     """
-#
-#     """
-#     __metaclass__ = StrainBeMeta
-#
-#     def __init__(self, column):
-#         pass
-
-class ColumnStrainerFactory(object):
-
-    @classmethod
-    def create(cls, column_type='*'):
-        if column_type == '*':
-            default = True
-
-
-#class TextStrainer(ColumnStrainer):
-class TextStrainer(object):
-    """
-
-    """
-    dict((('strartswith', lambda x, y: x.ilike('{0}%'.format(y))),
-         ('endswith', lambda x, y: x.ilike('%{0}'.format(y))),
-         ('like', lambda x, y: x.ilike('%{0}%'.format(y))),
-         ('not like', lambda x, y: x.ilike('%{0}%'.format(y))),
-         ('is', lambda x, y: x.is_(y)),
-         ('is not', lambda x, y: x.isnot(y))))
-
-
-registry = {}
-
-
-class TypeStrainer(object):
-    _column_type = None
-    _actions = None
-
-    def __init__(self, column_type, actions):
-        self._column_type = column_type
-        self._actions = actions
-
-    def strain(self, action, *args):
-        return self._actions[action](*args)
-
-    @property
-    def column_type(self):
-        return self._column_type
-
-    @property
-    def actions(self):
-        return self._actions
-    #filter_for('all')
-    def contains(self):
-        return False
-
-#DefaultStrainer = TypeStrainer('all', [DefaultStrainer.contains, DefaultStrainer.notcontains])
-
-
-def filter_for(data_type, action=None):
-    """Create decorator
-
-    :param data_type: column type such as string, int,
-    :type type: str
-    :return: decorator
-    """
-
-    def decorator(func):
-        name = action if action is not None else func.func_name
-        registry.setdefault(data_type, {})[name] = func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
+        self.strainer.strain(data)
+        return self.strainer.apply(query)
 

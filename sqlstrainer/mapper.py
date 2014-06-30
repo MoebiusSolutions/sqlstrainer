@@ -83,6 +83,14 @@ class DBMap():
         if col is not None and len(col) == 1:
             return col[0]
 
+    def get_mapper(self, tablename, default=None):
+        """get a mapper based on tablename"""
+        for mapper in self._relations:
+            for table in mapper.tables:
+                if table.name == tablename:
+                    return mapper
+
+
     def find_columns(self, name):
         """Search for a column by name
 
@@ -110,6 +118,11 @@ class DBMap():
             if column is not None:
                 return column
             name = '{0}.{1}'.format('_'.join(parts[:ii-1]), '_'.join(parts[ii-1:]))
+
+    def columns_of(self, obj):
+        mapper = self.to_mapper(obj)
+        return set((name, entries[0].column) for name, entries in self._columns.iteritems()
+                   if '.' in name and entries[0].mapper == mapper)
 
     @staticmethod
     def to_mapper(obj):

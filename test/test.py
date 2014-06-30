@@ -1,28 +1,40 @@
+from sqlalchemy.orm import create_session
+
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
-
-from sqlstrainer import mapper, match, strainer
-
+from sqlstrainer.strainer import Strainer
 from sqlalchemy import create_engine
-
 session = None
-
+strainer = None
+import models as m
 
 def setup():
+    global session
     engine = create_engine('sqlite:///:memory:')
-    session.configure(bind=engine)
+    session = create_session(bind=engine)
     # You probably need to create some tables and
     # load some test data, do so here.
 
     # To create tables, you typically do:
-    model.metadata.create_all(engine)
+    m.Model.metadata.create_all(engine)
+
+    m.build_fake_data(session)
+
 
 def teardown():
-    session.remove()
-
+    m.dump(session)
 
 def test_something():
-    instances = session.query(model.SomeObj).all()
-    eq_(0, len(instances))
-    session.add(model.SomeObj())
-    session.flush()
+    strainer = Strainer(m.Product)
+
+    assert(len(session.query(m.Product).all()) > 0)
+
+
+def test_something2():
+
+    assert(len(session.query(m.Product).all()) > 0)
+
+
+def test_something3():
+
+    assert(len(session.query(m.Product).all()) > 9999990)
