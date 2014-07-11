@@ -45,6 +45,12 @@ class Group(object):
                 yield column
 
     @property
+    def paths(self):
+        for group in self.all:
+            for path in group._paths:
+                yield path
+
+    @property
     def all(self):
         stack = []
         stack.append(self)
@@ -71,7 +77,7 @@ class Strainer(object):
 
     restrictive = True
 
-    def __init__(self, base, dbmap=None, strict=False):
+    def __init__(self, base, dbmap=None, strict=False, all_relatives=False):
         """
         :param base: base entity - all joins originate from here
         :type base: Declarative or Mapper
@@ -84,8 +90,13 @@ class Strainer(object):
         if dbmap is None:
             dbmap = DBMap()
         self._dbmap = dbmap
-
-        self._group = Group(dbmap.to_mapper(base))
+        mapper = dbmap.to_mapper(base)
+        self._group = Group(mapper)
+        if all_relatives:
+            relatives = dbmap.all_relatives(mapper)
+            for relative, paths in relatives.iteritems():
+                shortest_path = sorted(paths, key=lambda sp: len(sp))[0]
+                self.group._paths.append(shortest_path)
 
         self.options = {}
         self._strict = strict

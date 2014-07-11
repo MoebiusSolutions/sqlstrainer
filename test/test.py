@@ -12,12 +12,9 @@ def setup():
     global session
     engine = create_engine('sqlite:///:memory:')
     session = create_session(bind=engine)
-    # You probably need to create some tables and
-    # load some test data, do so here.
-
-    # To create tables, you typically do:
+    # build test schema
     m.Model.metadata.create_all(engine)
-
+    # populate test data
     m.build_fake_data(session)
 
 
@@ -26,8 +23,9 @@ def teardown():
 
 def test_something():
     strainer = Strainer(m.Product)
-
-    assert(len(session.query(m.Product).all()) > 0)
+    assert(len(strainer.columns) > 0)
+    strainer2 = Strainer(m.Product, all_relatives=True)
+    assert(len(strainer2.columns) > len(strainer.columns))
 
 
 def test_something2():
@@ -36,5 +34,5 @@ def test_something2():
 
 
 def test_something3():
-
-    assert(len(session.query(m.Product).all()) > 9999990)
+    c = session.query(m.Product).count()
+    assert(c > 9999990)
