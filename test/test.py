@@ -1,11 +1,11 @@
 from sqlalchemy.orm import create_session
+import pytest
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 from sqlstrainer.strainer import Strainer
 from sqlalchemy import create_engine
 session = None
-strainer = None
 import models as m
 
 def setup():
@@ -18,14 +18,25 @@ def setup():
     m.build_fake_data(session)
 
 
+@pytest.fixture
+def strainer():
+    return Strainer(m.Customer, strict=True, all_relatives=True)
+
+
 def teardown():
     m.dump(session)
 
-def test_something():
-    strainer = Strainer(m.Product)
-    assert(len(strainer.columns) > 0)
-    strainer2 = Strainer(m.Product, all_relatives=True)
-    assert(len(strainer2.columns) > len(strainer.columns))
+
+def test_something(strainer):
+    strainer.strain([
+        {'name': 'first_name', 'action': 'notcontains', 'value': ['b', 'c', 'd']},
+        {'name': 'parent.first_name', 'action': 'contains', 'value': ['a']}
+    ])
+    q = session.query(m.Customer)
+    assert(q.count() > 0)
+    q = strainer.apply(q)
+    print q, [x.parent for x in q.all()]
+    assert(q.count() > 0)
 
 
 def test_something2():
@@ -33,6 +44,5 @@ def test_something2():
     assert(len(session.query(m.Product).all()) > 0)
 
 
-def test_something3():
-    c = session.query(m.Product).count()
-    assert(c > 9999990)
+def test_something3(strainer):
+    assert(len(strainer.columns) > 0)

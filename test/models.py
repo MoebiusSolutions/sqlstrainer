@@ -86,6 +86,8 @@ class Parent(Model):
     gender = Column(String)
     details = Column(String)
 
+    def __str__(self):
+        return self.first_name + ' ' + self.last_name
 
 class Customer(Model):
     customer_id = Column(Integer, autoincrement=True, primary_key=True)
@@ -101,6 +103,8 @@ class Customer(Model):
     details = Column(String)
     parent = orm.relationship(Parent, backref='children')
 
+    def __str__(self):
+        return self.first_name + ' ' + self.last_name
 
 class Order(Model):
     order_id = Column(Integer, autoincrement=True, primary_key=True)

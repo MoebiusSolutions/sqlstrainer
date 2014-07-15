@@ -26,7 +26,8 @@ from functools import wraps
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 # """
-# c = Column
+# For all lambdas:
+# c = Column:
 # d = Data
 # """
 
@@ -53,6 +54,8 @@ _numeric = {
     'ge': lambda c, d: c >= d,
     'eq': lambda c, d: c == d,
     'ne': lambda c, d: c != d,
+    'ibound': lambda c, d: sa.and_(c >= min(*d), c <= max(*d)),
+    'xbound': lambda c, d: sa.and_(c > min(*d), c < max(*d)),
     'is': lambda c, d: c == d,
     'isnot': lambda c, d: c != d,
     'empty': lambda c, d: c.is_(c, None),
@@ -74,8 +77,8 @@ _time.update({
 })
 
 _string = {
-    'contains': lambda c, d: c.like('%{0}%'.format(d)),
-    'notcontains': lambda c, d: sa.not_(c.like('%{0}%'.format(d))),
+    'contains': lambda c, d: c.ilike('%{0}%'.format(d)),
+    'notcontains': lambda c, d: sa.not_(c.ilike('%{0}%'.format(d))),
     'empty': lambda c, d: sa.or_(c.is_(c, None), c == ''),
     'notempty': lambda c, d: sa.and_(c.isnot(c, None), c != ''),
 }

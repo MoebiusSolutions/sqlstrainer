@@ -7,7 +7,7 @@
 import itertools
 from sqlalchemy import inspect
 
-from sqlstrainer.mapper import DBMap
+from sqlstrainer.mapper import DBMap, ColumnEntry
 from sqlstrainer.match import column_matcher
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
@@ -15,40 +15,49 @@ __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 def _any_to_many(v):
     if isinstance(v, basestring):
         yield v
-        return
-    try:
-        for value in iter(v):
-            yield value
-    except TypeError:
-        yield v
+    else:
+        try:
+            for value in iter(v):
+                yield value
+        except TypeError:
+            yield v
 
 
 class Group(object):
     name = None
     base = None
+
     _paths = None
+
+    """nested list of groups"""
     _include = None
+    """list of excluded columns, mappers or relations"""
     _exclude = None
+
     flags = None
 
     def __init__(self, base, name=None):
+        # TODO: Fix include/path functionality
         self.base = base
         self.name = name if name else getattr(base, '__name__', 'Other')
         self._paths = []
         self._include = []
         self._exclude = []
 
-    @property
-    def exclude(self):
-        for group in self.all:
-            for column in group._exclude:
-                yield column
+    def __getitem__(self, entry):
+        if not isinstance(entry, ColumnEntry):
+            raise TypeError('{0} expected for key, {1} found'.format(ColumnEntry, type(entry)))
 
-    @property
-    def paths(self):
         for group in self.all:
-            for path in group._paths:
-                yield path
+            if group.base == entry.mapper:
+                if entry.column in group._exclude:
+                    raise KeyError(entry)
+                return entry.column
+
+        raise KeyError(entry)
+
+    def exclude(self):
+        return self._exclude
 
     @property
     def all(self):
@@ -74,6 +83,7 @@ class Strainer(object):
     """
     _strict = False
     _filters = None
+    _columns = None
 
     restrictive = True
 
@@ -96,11 +106,19 @@ class Strainer(object):
             relatives = dbmap.all_relatives(mapper)
             for relative, paths in relatives.iteritems():
                 shortest_path = sorted(paths, key=lambda sp: len(sp))[0]
-                self.group._paths.append(shortest_path)
+                self.group._paths.append(shortest_path[0].property)
 
         self.options = {}
         self._strict = strict
         self._filters = None
+        self._columns = None
+
+    def __getitem__(self, item):
+        entry = self._dbmap.get(str(item))
+        if not entry:
+            entry = self._dbmap[self._group.base.entity.__tablename__ + '.' + item]
+        return self._group[entry]
+
 
     @property
     def columns(self):
@@ -165,7 +183,7 @@ class Strainer(object):
         data format::
 
             [
-             { 'name': 'column_name1', 'action': 'startswith', 'value': ['a','b'], 'find': 'any' },
+             { 'name': 'column_name1', 'action': 'contains', 'value': ['a','b'], 'find': 'any' },
              { 'name': 'column_name2', 'action': 'lt', 'value': 37 }
             ]
 
@@ -184,12 +202,12 @@ class Strainer(object):
         :raises Error: when strict mode is enabled
         """
         self._filters = []
+        self._columns = []
         for item in data:
             try:
                 name = item['name']
-                column = self._dbmap[name]
-                if column in self.group.exclude or name in self.group.exclude:
-                    raise KeyError(name)
+                print [g.base for g in self.group.all]
+                column = self[name]
                 action = item.get('action', 'contains')
                 column_filter = column_matcher(column, action)
                 value = item.get('value', None)
@@ -199,7 +217,6 @@ class Strainer(object):
                     logic_op = _logical_operations[item.get('find', 'any').lower()]
                     f = reduce(logic_op, (column_filter(column, x) for x in _any_to_many(value)))
                 self._filters.append(f)
-
             except Exception as e:
                 if self._strict:
                     raise e
@@ -209,11 +226,15 @@ class Strainer(object):
     def apply(self, query):
         if not self._filters:
             return query
-
         if self.restrictive:
-            return query.filter(*self._filters).join(*self.join)
-
-        return query.filter(reduce(_logical_operations['any'], self._filters)).outerjoin(*self.join).distinct()
+            query = query.filter(*self._filters)
+            if self._columns:
+                query = query.join(*self._columns)
+        else:
+            query = query.filter(reduce(_logical_operations['any'], self._filters))
+            if self._columns:
+                query = query.outerjoin(*self.join).distinct()
+        return query
 
 
 class StrainerMixin(object):

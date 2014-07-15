@@ -28,6 +28,9 @@ class ColumnEntry(object):
         self.mapper = mapper
         self.column = column
 
+    def __repr__(self):
+        return '{0}.{1}'.format(self.mapper.entity.__tablename__, self.column.name)
+
 
 class DBMap():
     """Database Map
