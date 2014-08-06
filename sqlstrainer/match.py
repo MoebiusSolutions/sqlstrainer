@@ -36,15 +36,15 @@ _default = {
     'notcontains': lambda c, d: sa.not_(sa.cast(c, sa.String).like('%{0}%'.format(str(d)))),
     'is': lambda c, d: c == d,
     'isnot': lambda c, d: c != d,
-    'empty': lambda c, d: c.is_(c, None),
-    'notempty': lambda c, d: c.isnot(c, None),
+    'empty': lambda c, d: c.is_(None),
+    'notempty': lambda c, d: c.isnot(None),
 }
 
 _bool = {
     'is': lambda c, d: c,
     'isnot': lambda c, d: sa.not_(c),
-    'empty': lambda c, d: c.is_(c, None),
-    'notempty': lambda c, d: c.isnot(c, None),
+    'empty': lambda c, d: c.is_(None),
+    'notempty': lambda c, d: c.isnot(None),
 }
 
 _numeric = {
@@ -58,8 +58,8 @@ _numeric = {
     'xbound': lambda c, d: sa.and_(c > min(*d), c < max(*d)),
     'is': lambda c, d: c == d,
     'isnot': lambda c, d: c != d,
-    'empty': lambda c, d: c.is_(c, None),
-    'notempty': lambda c, d: c.isnot(c, None),
+    'empty': lambda c, d: c.is_(None),
+    'notempty': lambda c, d: c.isnot(None),
 }
 _date = dict(**_numeric)
 _date.update({
@@ -79,8 +79,8 @@ _time.update({
 _string = {
     'contains': lambda c, d: c.ilike('%{0}%'.format(d)),
     'notcontains': lambda c, d: sa.not_(c.ilike('%{0}%'.format(d))),
-    'empty': lambda c, d: sa.or_(c.is_(c, None), c == ''),
-    'notempty': lambda c, d: sa.and_(c.isnot(c, None), c != ''),
+    'empty': lambda c, d: sa.or_(c.is_(None), c == ''),
+    'notempty': lambda c, d: sa.and_(c.isnot(None), c != ''),
 }
 _string.update(_bool)
 

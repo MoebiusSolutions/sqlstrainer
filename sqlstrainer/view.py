@@ -1,3 +1,47 @@
+"""Views
+
+Each core model in an app will have 1 or more views of its data.
+
+This module handles both configuring which columns you define as viewable
+as well as selecting which are actually part of the view (query).
+
+In any app where you want dynamic selection of viewed columns,
+you will need to define viewable columns.
+
+
+By default:
+
+ * all table columns are viewable.
+ * all hybrid properties are hidden
+ * no columns are selected for viewing
+ * Label generated using python title()
+
+class MyModel(Model, Viewable):
+    # viewable (not selected by default)
+    first_name = Column(String)
+    # viewable, selected by default
+    last_name = Column(String, info={'selected': True, 'label': 'Surname'})
+    # hidden (not selectable)
+    noseeum = Column(String, default='Secret', info={'hidden': True})
+
+
+    @hybrid_property
+    def filterable_only(self):
+        return self.a - self.b
+
+    @viewable(label='Full Name', selected=True)
+    @hybrid_property
+    def full_name(self):
+        return self.first_name + " " + self.last_name
+
+-----------
+NOTES: viewable uses decorator
+view - list from dev
+view - default = model
+handles aggregate.
+
+
+"""
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 from functools import wraps
@@ -18,6 +62,19 @@ def viewable(**info):
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+class View(object):
+
+    def __init__(self, base):
+        self.base = base
+        self.columns = []
+        self.group_by = []
+        self.order_by = []
+
+        self.page = 1
+        self.rows_per_page = 50
+
 
 """ possible userview
 
