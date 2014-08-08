@@ -60,6 +60,7 @@ class DBMap():
         for mapper, _ in filter(lambda _, is_primary: is_primary, registry.iteritems()):
             self._relations[mapper] = dict((rprop.class_attribute, rprop.mapper) for rprop in mapper.relationships)
             model = mapper.entity
+# Handle Viewables
             for name, o in mapper.all_orm_descriptors.items():
                 column = None
                 if isinstance(o, InstrumentedAttribute):

@@ -8,19 +8,17 @@ as well as selecting which are actually part of the view (query).
 In any app where you want dynamic selection of viewed columns,
 you will need to define viewable columns.
 
-
 By default:
 
  * all table columns are viewable.
  * all hybrid properties are hidden
  * no columns are selected for viewing
- * Label generated using python title()
+ * Label generated using `str.title()`
 
-class MyModel(Model, Viewable):
+@viewable
+class MyModel(Model):
     # viewable (not selected by default)
     first_name = Column(String)
-    # viewable, selected by default
-    last_name = Column(String, info={'selected': True, 'label': 'Surname'})
     # hidden (not selectable)
     noseeum = Column(String, default='Secret', info={'hidden': True})
 
@@ -29,8 +27,8 @@ class MyModel(Model, Viewable):
     def filterable_only(self):
         return self.a - self.b
 
-    @viewable(label='Full Name', selected=True)
     @hybrid_property
+    @viewable(label='Full Name')
     def full_name(self):
         return self.first_name + " " + self.last_name
 
@@ -40,12 +38,21 @@ view - list from dev
 view - default = model
 handles aggregate.
 
+Aggregate links to separate tables are mutually exclusive,
+ - meaning if you aggregate a relationship you cannot also get individual row data from that relationship
+
+view - can pass options
 
 """
+import inspect
+from sqlalchemy.ext.hybrid import hybrid_property
+
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 from functools import wraps
 
+def _viewable(cls):
+    yield 'items'
 
 def viewable(**info):
     """Create decorator
@@ -55,8 +62,19 @@ def viewable(**info):
     :return: decorator
     """
 
-    def decorator(func):
-        setattr(func, '_info', info)
+    def decorator(obj):
+        if inspect.isclass(obj):
+            oldget = obj.__getattribute__
+            def newget(cls, item):
+                if item == 'viewable':
+                    return _viewable(cls)
+                return oldget(cls, item)
+            obj.__getattribute__ = newget
+            return obj
+
+        obj._info = info
+        func = obj
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
@@ -74,7 +92,6 @@ class View(object):
 
         self.page = 1
         self.rows_per_page = 50
-
 
 """ possible userview
 

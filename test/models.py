@@ -10,6 +10,7 @@ from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy import Column, Integer, String, ForeignKey, Date, DECIMAL, func, DateTime
 from sqlalchemy import orm
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
+from sqlalchemy.orm import backref
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
@@ -132,11 +133,12 @@ class OrderProduct(Model):
     order_id = Column(Integer, ForeignKey(Order.order_id), primary_key=True)
     product_id = Column(Integer, ForeignKey(Product.product_id), primary_key=True)
     quantity_ordered = Column(Integer, nullable=False, default=0)
-    order = orm.relationship(Order, backref='product_quantity')
-    product = orm.relationship(Product, backref='order_quantity')
+    order = orm.relationship(Order, backref=backref('product_quantity', info={'label': 'PRODUCT'}))
+    product = orm.relationship(Product, backref='order_quantity', info={'label': 'PRODUCT'})
 
 
 Order.products = association_proxy('product_quantity', 'product')
+Order.products.info = {'label': 'Product Stuffs'}
 Product.orders = association_proxy('order_quantity', 'order')
 
 
