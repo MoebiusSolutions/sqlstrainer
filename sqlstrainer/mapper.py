@@ -57,7 +57,7 @@ class DBMap():
             registry = orm._mapper_registry
         self._relations = dict()
         self._columns = dict()
-        for mapper, _ in filter(lambda _, is_primary: is_primary, registry.iteritems()):
+        for mapper, _ in filter(lambda (_, is_primary): is_primary, registry.iteritems()):
             self._relations[mapper] = dict((rprop.class_attribute, rprop.mapper) for rprop in mapper.relationships)
             model = mapper.entity
 # Handle Viewables
@@ -237,4 +237,25 @@ class DBMap():
         """
         return self._relations[mapper]
 
+def find_viewable(mapper, exclude=None):
+    """
+    """
+    if exclude is None:
+        exclude = set()
+    for supercls in mapper.class_.__mro__:
+        for key in set(supercls.__dict__).difference(exclude):
+            exclude.add(key)
+            o = supercls.__dict__[key]
+            exclude.add(key)
+            info = None
+            if isinstance(o, InstrumentedAttribute):
+                if isinstance(o.property, ColumnProperty):
+                    info = o.info
+            elif hasattr(o, 'fget') and hasattr(o.fget, '_info'):
+                info = getattr(o.fget, '_info')
+            if info is None or info.get('hidden'):
+                continue
 
+            key = '{0}.{1}'.format(mapper.tables[0].name, key)
+            label = info.get('label', key.replace('.', ' ').title())
+            yield key, label

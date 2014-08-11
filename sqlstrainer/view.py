@@ -43,6 +43,21 @@ Aggregate links to separate tables are mutually exclusive,
 
 view - can pass options
 
+
+
+MODEL:
+  default viewable
+
+From a VIEW:
+   define View type [aggregate|nested|distinct] (BASE MODEL) [distinct=?=aggregate]
+
+   filters -> traversal (should be universal/view independent) [but configurable just in case]
+   filters -> special case
+        - aggregate (use having)
+        - not in - use outerjoin, id IS NULL [for performance]
+
+
+
 """
 import inspect
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -81,17 +96,6 @@ def viewable(**info):
         return wrapper
     return decorator
 
-
-class View(object):
-
-    def __init__(self, base):
-        self.base = base
-        self.columns = []
-        self.group_by = []
-        self.order_by = []
-
-        self.page = 1
-        self.rows_per_page = 50
 
 """ possible userview
 

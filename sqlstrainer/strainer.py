@@ -86,6 +86,8 @@ class Strainer(object):
     _columns = None
 
     restrictive = True
+    VIEW_DISTINCT = 1
+    VIEW_NESTED = 2
 
     def __init__(self, base, dbmap=None, strict=False, all_relatives=False):
         """
@@ -206,7 +208,6 @@ class Strainer(object):
         for item in data:
             try:
                 name = item['name']
-                print [g.base for g in self.group.all]
                 column = self[name]
                 action = item.get('action', 'contains')
                 column_filter = column_matcher(column, action)
@@ -235,6 +236,11 @@ class Strainer(object):
             if self._columns:
                 query = query.outerjoin(*self.join).distinct()
         return query
+
+
+
+
+
 
 
 class StrainerMixin(object):

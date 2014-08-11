@@ -30,19 +30,18 @@ def teardown():
 def test_something(strainer):
     strainer.strain([
         {'name': 'first_name', 'action': 'notcontains', 'value': ['b', 'c', 'd']},
-        {'name': 'parent.first_name', 'action': 'contains', 'value': ['a']}
+       # {'name': 'parent.first_name', 'action': 'contains', 'value': ['a']}
     ])
     q = session.query(m.Customer)
-    assert(q.count() > 0)
-    q = strainer.apply(q)
-    print q, [x.parent for x in q.all()]
+    print list(strainer._dbmap.viewable(m.Customer.__mapper__))
     assert(q.count() > 0)
 
 
-def test_something2():
 
-    assert(len(session.query(m.Product).all()) > 0)
-
-
-def test_something3(strainer):
-    assert(len(strainer.columns) > 0)
+# def test_something2():
+#
+#     assert(len(session.query(m.Product).all()) > 0)
+#
+#
+# def test_something3(strainer):
+#     assert(len(strainer.columns) > 0)
