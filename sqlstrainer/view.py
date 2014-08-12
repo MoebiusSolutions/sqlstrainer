@@ -60,14 +60,43 @@ From a VIEW:
 
 """
 import inspect
-from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import ColumnProperty
+from sqlalchemy.orm.attributes import InstrumentedAttribute
+from functools import wraps
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
-from functools import wraps
+_make_label = lambda s: s.replace('_', ' ').title()
 
-def _viewable(cls):
-    yield 'items'
+def find_viewable(cls, label=None, include=None, exclude=None):
+    """
+    """
+    if exclude is None:
+        exclude = set()
+    yield cls.__tablename__, label if label else _make_label(cls.__tablename__)
+
+    for supercls in cls.__mro__:
+        for key in set(supercls.__dict__).difference(exclude):
+            exclude.add(key)
+            o = supercls.__dict__[key]
+            exclude.add(key)
+            info = None
+            if isinstance(o, InstrumentedAttribute):
+                if isinstance(o.property, ColumnProperty):
+                    info = o.info
+            elif hasattr(o, 'fget') and hasattr(o.fget, '_info'):
+                info = getattr(o.fget, '_info')
+            if info is None or info.get('hidden'):
+                continue
+
+            lbl = info.get('label')
+            if not lbl:
+                lbl = _make_label(key)
+            yield '{0}.{1}'.format(cls.__tablename__, key), lbl
+
+    for relative in include:
+        for key, lbl in relative.viewable:
+            yield key, lbl
 
 def viewable(**info):
     """Create decorator
@@ -79,16 +108,14 @@ def viewable(**info):
 
     def decorator(obj):
         if inspect.isclass(obj):
-            oldget = obj.__getattribute__
-            def newget(cls, item):
-                if item == 'viewable':
-                    return _viewable(cls)
-                return oldget(cls, item)
-            obj.__getattribute__ = newget
+            mapper = getattr(obj, '__mapper__')
+            if not mapper:
+                raise TypeError('Expected SQLAlchemy declarative_base() Class')
+            obj.viewable = property(lambda: find_viewable(obj, **info))
             return obj
 
-        obj._info = info
         func = obj
+        obj.info = info
 
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -157,3 +184,5 @@ def total_invalid():
 {'label': 'Text', 'value': db.func.count('*'), 'aggregate': Plugin}
 
 """
+
+

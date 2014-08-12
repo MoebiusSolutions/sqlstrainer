@@ -6,13 +6,21 @@
 """
 import itertools
 from sqlalchemy import inspect
+from sqlalchemy.ext.hybrid import hybrid_property
 
-from sqlstrainer.mapper import DBMap, ColumnEntry
+from sqlstrainer.mapper import StrainerMap  #  , ColumnEntry
 from sqlstrainer.match import column_matcher
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 
 def _any_to_many(v):
+    """list generator for any input: text, numeric or iterable
+
+    wrapped in list produces:
+        None -> [], 'test'->['test'], 123 -> [123], (1,2,3) -> [1,2,3]
+    """
+    if v is None:
+        raise StopIteration
     if isinstance(v, basestring):
         yield v
     else:
@@ -23,8 +31,34 @@ def _any_to_many(v):
             yield v
 
 
-class Group(object):
-    name = None
+def strainer_property(**info):
+    """very simple decorator to markup hybrid_property with info similar to Column(info={})
+
+    instead of:
+    @hybrid_property
+    def full_name(self):
+        return self.first + ' ' + self.last
+
+    use:
+    @strainer_property(label='Full Name')
+    def full_name(self):
+        return self.first + ' ' + self.last
+
+    :param info: kwargs style dict for strainer information
+    :return: hybrid_property decorator
+    """
+    def decorator(func):
+        if not info.get('filterable', True):
+            ret = property(func)
+        else:
+            ret = hybrid_property(func)
+        ret.fget.info = info
+        return ret
+    return decorator
+
+
+class NestablePath(object):
+    _name = None
     base = None
 
     _paths = None
@@ -39,14 +73,24 @@ class Group(object):
     def __init__(self, base, name=None):
         # TODO: Fix include/path functionality
         self.base = base
-        self.name = name if name else getattr(base, '__name__', 'Other')
+        self._name = name
         self._paths = []
         self._include = []
         self._exclude = []
 
+    @property
+    def name(self):
+        if not self._name:
+            self._name = self.base.class_.__name__
+        return self._name
+
+    @property
+    def paths(self):
+        return self._paths
+
     def __getitem__(self, entry):
-        if not isinstance(entry, ColumnEntry):
-            raise TypeError('{0} expected for key, {1} found'.format(ColumnEntry, type(entry)))
+        # if not isinstance(entry, ColumnEntry):
+        #     raise TypeError('{0} expected for key, {1} found'.format(ColumnEntry, type(entry)))
 
         for group in self.all:
             if group.base == entry.mapper:
@@ -61,8 +105,7 @@ class Group(object):
 
     @property
     def all(self):
-        stack = []
-        stack.append(self)
+        stack = [self]
         while stack:
             group = stack.pop()
             yield group
@@ -81,6 +124,7 @@ class Strainer(object):
 
     >>> strainer = Strainer(User)
     """
+    _dbmap = None
     _strict = False
     _filters = None
     _columns = None
@@ -99,16 +143,16 @@ class Strainer(object):
         :type strict: bool
         """
 
-        if dbmap is None:
-            dbmap = DBMap()
-        self._dbmap = dbmap
+        if self.__class__._dbmap is None:
+            dbmap = StrainerMap()
+        self.__class__._dbmap = dbmap
         mapper = dbmap.to_mapper(base)
-        self._group = Group(mapper)
+        self._group = NestablePath(mapper)
         if all_relatives:
             relatives = dbmap.all_relatives(mapper)
             for relative, paths in relatives.iteritems():
                 shortest_path = sorted(paths, key=lambda sp: len(sp))[0]
-                self.group._paths.append(shortest_path[0].property)
+                self.group.paths.append(shortest_path[0].property)
 
         self.options = {}
         self._strict = strict
@@ -238,11 +282,6 @@ class Strainer(object):
         return query
 
 
-
-
-
-
-
 class StrainerMixin(object):
     """SQLStrainer Mixin - Adds a SQLStrainer instance to Declarative classes."""
 
@@ -257,4 +296,5 @@ class StrainerMixin(object):
     def strain(self, query, data):
         self.strainer.strain(data)
         return self.strainer.apply(query)
+
 

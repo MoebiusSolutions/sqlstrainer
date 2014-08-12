@@ -10,7 +10,6 @@ from sqlalchemy import inspect, orm
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.ext.hybrid import hybrid_property
-import re
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
@@ -19,20 +18,37 @@ class NoPathAvailable(Exception):
     """Relationship path does not exist"""
 
 
-class ColumnEntry(object):
+class StrainerColumn(object):
     """Simple class to hold mapper and column data"""
-    mapper = None
-    column = None
+    # COLUMN = 'column'
+    # HYBRID = 'hybrid'
+    # PROPERTY = 'property'
+    # ext = COLUMN
 
-    def __init__(self, mapper, column):
+    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True, **kwargs):
         self.mapper = mapper
-        self.column = column
+        self.name = name
+        self._column = column
+        self.label = label if label is not None else name.replace('_', ' ').title()
+        self.viewable = viewable
+        if not (isinstance(column, InstrumentedAttribute) or isinstance(column, hybrid_property)):
+            # cannot filter on instance properties
+            filterable = False
+        self.filterable = filterable
+
+    @property
+    def column(self):
+        if isinstance(self._column, InstrumentedAttribute):
+            return self._column
+        if isinstance(self._column, hybrid_property):
+            return getattr(self.mapper.class_, self.name)
+        # should not be called on property
 
     def __repr__(self):
-        return '{0}.{1}'.format(self.mapper.entity.__tablename__, self.column.name)
+        return '<StrainerColumn {0}.{1}>'.format(self.mapper.class_.__tablename__, self.name)
 
 
-class DBMap():
+class StrainerMap():
     """Database Map
 
     Helper class that holds SQLAlchemy ORM relationship and column information in lookup tables.
@@ -41,51 +57,60 @@ class DBMap():
     By default, uses :data:`sqlalchemy.orm._mapper_registry`.
     """
 
-    _relations = None
-
-    _columns = None
-    """a map of all columns and hybrid properties in the ORM
-
-    name: ColumnEntry(mapper, column)
-
-    where name is either a column name unique in the ORM
-        or table_name.column_name
-    """
-
     def __init__(self, registry=None):
         if registry is None:
             registry = orm._mapper_registry
-        self._relations = dict()
-        self._columns = dict()
-        for mapper, _ in filter(lambda (_, is_primary): is_primary, registry.iteritems()):
+        self._columns = {}
+        self._relations = {}
+        # filters non-primary entries
+        for mapper, _ in filter(lambda x: x[1], registry.iteritems()):
             self._relations[mapper] = dict((rprop.class_attribute, rprop.mapper) for rprop in mapper.relationships)
-            model = mapper.entity
-# Handle Viewables
-            for name, o in mapper.all_orm_descriptors.items():
-                column = None
-                if isinstance(o, InstrumentedAttribute):
-                    if isinstance(o.property, ColumnProperty):
-                        column = o
-                elif isinstance(o, hybrid_property):
-                    column = getattr(model, name)
-                if column is not None:
-                    self._columns.setdefault(name, []).append(ColumnEntry(mapper, column))
-                    self._columns[model.__tablename__ + '.' + name] = [ColumnEntry(mapper, column)]
+            cls = mapper.class_
+            tbl = cls.__tablename__
+            model = self._columns[tbl] = {}
+            exclude = set()
+            for supercls in mapper.class_.__mro__:
+                for key in set(supercls.__dict__).difference(exclude):
+                    exclude.add(key)
+                    o = supercls.__dict__[key]
+                    exclude.add(key)
+                    if isinstance(o, InstrumentedAttribute) and isinstance(o.property, ColumnProperty):
+                        info = o.info
+                    elif hasattr(o, 'fget') and hasattr(o.fget, 'info'):
+                        info = o.fget.info
+                    else:
+                        continue
+                    model[key] = StrainerColumn(mapper, key, o, **info)
 
     def __contains__(self, item):
         self.get(item) is not None
 
     def __getitem__(self, item):
-        col = self.get(item)
-        if col is None:
+        obj = self.get(item)
+        if obj is None:
             raise KeyError(item)
-        return col
+        return obj
 
     def get(self, item, default=None):
-        """get a unique ColumnEntry using :meth:`.find_columns`"""
-        col = self.find_columns(item)
-        if col is not None and len(col) == 1:
-            return col[0]
+        """Fetch a Mapper, StrainerColumn or Relationship based on string key"""
+        parts = item.split('.')
+        found = filter(lambda m: m.class_.__tablename__ == parts[0], self._relations.keys())
+        if not found:
+            return default
+        mapper = found[0]
+        if len(parts) == 1:
+            return mapper
+
+        model = self._columns.get(parts[0], None)
+        if model:
+            col = model.get(parts[1], None)
+            if col:
+                return col
+
+        found = filter(lambda r: r.key == parts[1], self._relations[mapper].keys())
+        if found:
+            return found[0]
+        return default
 
     def get_mapper(self, tablename, default=None):
         """get a mapper based on tablename"""
@@ -93,40 +118,7 @@ class DBMap():
             for table in mapper.tables:
                 if table.name == tablename:
                     return mapper
-
-
-    def find_columns(self, name):
-        """Search for a column by name
-
-        where name is `my_table_my_column` attempt:
-
-        1.    my_table_my_column
-        2.    my_table_my.column
-        3.    my_table.my_column
-        4.    my.table_my_column
-
-        having table `my_table` with column `my_column`
-
-        returns a list of entries for `my_table.my_column`
-
-        Use :meth:`get` to retrieve a unique column entry
-
-        :param name: column name
-        :type name: str
-        :return: a list of column entries matching name
-        :rtype: list of :class:`ColumnEntry`
-        """
-        parts = re.split(r'[._]', name)
-        for ii in range(len(parts), 0, -1):
-            column = self._columns.get(name)
-            if column is not None:
-                return column
-            name = '{0}.{1}'.format('_'.join(parts[:ii-1]), '_'.join(parts[ii-1:]))
-
-    def columns_of(self, obj):
-        mapper = self.to_mapper(obj)
-        return set((name, entries[0].column) for name, entries in self._columns.iteritems()
-                   if '.' in name and entries[0].mapper == mapper)
+        return default
 
     @staticmethod
     def to_mapper(obj):
@@ -237,25 +229,3 @@ class DBMap():
         """
         return self._relations[mapper]
 
-def find_viewable(mapper, exclude=None):
-    """
-    """
-    if exclude is None:
-        exclude = set()
-    for supercls in mapper.class_.__mro__:
-        for key in set(supercls.__dict__).difference(exclude):
-            exclude.add(key)
-            o = supercls.__dict__[key]
-            exclude.add(key)
-            info = None
-            if isinstance(o, InstrumentedAttribute):
-                if isinstance(o.property, ColumnProperty):
-                    info = o.info
-            elif hasattr(o, 'fget') and hasattr(o.fget, '_info'):
-                info = getattr(o.fget, '_info')
-            if info is None or info.get('hidden'):
-                continue
-
-            key = '{0}.{1}'.format(mapper.tables[0].name, key)
-            label = info.get('label', key.replace('.', ' ').title())
-            yield key, label

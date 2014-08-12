@@ -11,6 +11,8 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Date, DECIMAL, func,
 from sqlalchemy import orm
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import backref
+from sqlstrainer.strainer import strainer_property
+from sqlstrainer.view import viewable
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
@@ -90,6 +92,7 @@ class Parent(Model):
     def __str__(self):
         return self.first_name + ' ' + self.last_name
 
+
 class Customer(Model):
     customer_id = Column(Integer, autoincrement=True, primary_key=True)
     parent_id = Column(Integer, ForeignKey(Parent.parent_id))
@@ -104,8 +107,22 @@ class Customer(Model):
     details = Column(String)
     parent = orm.relationship(Parent, backref='children')
 
+    @strainer_property(label='Test')
+    def test(self):
+        return str(self)
+
+    @test.expression
+    def test(cls):
+        return cls.first_name + ' ' + cls.last_name
+
+
+    @strainer_property(filterable=False)
+    def view_only(self):
+        return 'No class expression'
+
     def __str__(self):
         return self.first_name + ' ' + self.last_name
+
 
 class Order(Model):
     order_id = Column(Integer, autoincrement=True, primary_key=True)
