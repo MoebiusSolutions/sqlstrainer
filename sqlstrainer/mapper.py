@@ -91,6 +91,11 @@ class StrainerMap():
             raise KeyError(item)
         return obj
 
+    def viewable(self, mapper):
+        tbl = mapper.class_.__tablename__
+        for name, col in self._columns[tbl].iteritems():
+            yield ('{0}.{1}'.format(tbl, name), col.label)
+
     def get(self, item, default=None):
         """Fetch a Mapper, StrainerColumn or Relationship based on string key"""
         parts = item.split('.')

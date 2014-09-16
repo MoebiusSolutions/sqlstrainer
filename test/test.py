@@ -24,7 +24,8 @@ def strainer():
 
 
 def teardown():
-    m.dump(session)
+    pass
+#    m.dump(session)
 
 
 def test_something(strainer):
