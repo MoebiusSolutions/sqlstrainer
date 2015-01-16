@@ -6,11 +6,13 @@ http://www.databaseanswers.org/data_models/customers_inventory_and_pos/index.htm
 import random
 import re
 from faker import Factory
+from marshmallow import fields
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy import Column, Integer, String, ForeignKey, Date, DECIMAL, func, DateTime
 from sqlalchemy import orm
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import backref
+from sqlstrainer.schema import BaseSchema, StringFilterSchema, NumberFilterSchema
 from sqlstrainer.strainer import strainer_property
 from sqlstrainer.view import viewable
 
@@ -257,3 +259,10 @@ def dump(session):
         for row in q:
             outcsv.writerow(list(row))
     outfile.close()
+
+class CustomerSchema(BaseSchema):
+    first_name = StringFilterSchema()
+    middle_name = StringFilterSchema()
+    last_name = StringFilterSchema()
+    current_balance = NumberFilterSchema()
+

@@ -7,11 +7,11 @@
 import itertools
 from sqlalchemy import inspect
 from sqlalchemy.ext.hybrid import hybrid_property
+from six import string_types
 
 from sqlstrainer.mapper import StrainerMap  #  , ColumnEntry
 from sqlstrainer.match import column_matcher
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
-
 
 def _any_to_many(v):
     """list generator for any input: text, numeric or iterable
@@ -21,7 +21,7 @@ def _any_to_many(v):
     """
     if v is None:
         raise StopIteration
-    if isinstance(v, basestring):
+    if isinstance(v, string_types):
         yield v
     else:
         try:
@@ -63,8 +63,6 @@ class NestablePath(object):
 
     _paths = None
 
-    """nested list of groups"""
-    _include = None
     """list of excluded columns, mappers or relations"""
     _exclude = None
 
@@ -75,7 +73,6 @@ class NestablePath(object):
         self.base = base
         self._name = name
         self._paths = []
-        self._include = []
         self._exclude = []
 
     @property
@@ -109,7 +106,7 @@ class NestablePath(object):
         while stack:
             group = stack.pop()
             yield group
-            for child in reversed(group._include):
+            for child in reversed(group._path):
                 stack.append(child)
 
 
@@ -178,7 +175,7 @@ class Strainer(object):
                 mappers.add(target)
         exclude = set()
         for obj in exclude_objs:
-            if isinstance(obj, basestring):
+            if isinstance(obj, string_types):
                 if '.' in obj:
                     column = self._dbmap.get(obj)
                     if column is not None:
@@ -228,10 +225,10 @@ class Strainer(object):
 
         data format::
 
-            [
-             { 'name': 'column_name1', 'action': 'contains', 'value': ['a','b'], 'find': 'any' },
-             { 'name': 'column_name2', 'action': 'lt', 'value': 37 }
-            ]
+            {
+             'column_name1': {'action': 'contains', 'value': ['a','b'], 'find': 'any' },
+             'column_name2': {'action': 'lt', 'value': 37 }
+            }
 
         * **name: Column Name**
 
@@ -249,18 +246,17 @@ class Strainer(object):
         """
         self._filters = []
         self._columns = []
-        for item in data:
+        for name, item in data.iteritems():
             try:
-                name = item['name']
                 column = self[name]
                 action = item.get('action', 'contains')
                 column_filter = column_matcher(column, action)
-                value = item.get('value', None)
-                if value is None:
+                values = item.get('values', None)
+                if values is None:
                     f = column_filter(column, None)
                 else:
                     logic_op = _logical_operations[item.get('find', 'any').lower()]
-                    f = reduce(logic_op, (column_filter(column, x) for x in _any_to_many(value)))
+                    f = reduce(logic_op, (column_filter(column, x) for x in _any_to_many(values)))
                 self._filters.append(f)
             except Exception as e:
                 if self._strict:
@@ -274,7 +270,7 @@ class Strainer(object):
         if self.restrictive:
             query = query.filter(*self._filters)
             if self._columns:
-                query = query.join(*self._columns)
+                query = query.join(*self.join)
         else:
             query = query.filter(reduce(_logical_operations['any'], self._filters))
             if self._columns:
@@ -293,8 +289,5 @@ class StrainerMixin(object):
             setattr(self, '_strainer', strainer)
         return strainer
 
-    def strain(self, query, data):
-        self.strainer.strain(data)
-        return self.strainer.apply(query)
 
 

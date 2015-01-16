@@ -29,14 +29,17 @@ def teardown():
 
 
 def test_something(strainer):
-    strainer.strain([
-        {'name': 'first_name', 'action': 'notcontains', 'value': ['b', 'c', 'd']},
-       # {'name': 'parent.first_name', 'action': 'contains', 'value': ['a']}
-    ])
+    args = {
+        'first_name': {'values': ['b', 'c', 'd'] }
+        }
+    f, err = m.CustomerSchema().load(args)
+    assert (not err)
+    strainer.strain(f)
     q = session.query(m.Customer)
-    print list(strainer._dbmap.viewable(m.Customer.__mapper__))
-    assert(q.count() > 0)
-
+    c1 = q.count()
+    q = strainer.apply(q)
+    c2 = q.count()
+    assert(c1 > c2)
 
 
 # def test_something2():

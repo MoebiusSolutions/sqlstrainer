@@ -1,0 +1,3 @@
+six
+sqlalchemy>=0.9.8
+marshmallow

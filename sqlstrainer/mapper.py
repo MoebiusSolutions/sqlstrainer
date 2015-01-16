@@ -6,7 +6,8 @@
 .. autoclass:: ColumnEntry
     :members:
 """
-from sqlalchemy import inspect, orm
+from sqlalchemy import inspect
+from sqlalchemy.orm import _mapper_registry
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -59,7 +60,7 @@ class StrainerMap():
 
     def __init__(self, registry=None):
         if registry is None:
-            registry = orm._mapper_registry
+            registry = _mapper_registry
         self._columns = {}
         self._relations = {}
         # filters non-primary entries
@@ -94,6 +95,7 @@ class StrainerMap():
     def viewable(self, mapper):
         tbl = mapper.class_.__tablename__
         for name, col in self._columns[tbl].iteritems():
+            # TODO: exclude PASSWORD
             yield ('{0}.{1}'.format(tbl, name), col.label)
 
     def get(self, item, default=None):

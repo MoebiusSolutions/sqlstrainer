@@ -21,7 +21,7 @@ from sqlalchemy.sql.elements import ClauseElement
 from sqlalchemy.sql.sqltypes import NullType
 
 from functools import wraps
-
+from marshmallow import Schema, fields
 
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
@@ -140,4 +140,5 @@ def filter_for(data_type, action=None):
             return func(*args, **kwargs)
         return wrapper
     return decorator
+
 
