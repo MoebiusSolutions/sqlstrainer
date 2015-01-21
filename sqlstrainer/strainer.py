@@ -4,13 +4,12 @@
     :members:
 
 """
-import itertools
-from sqlalchemy import inspect
 from sqlalchemy.ext.hybrid import hybrid_property
 from six import string_types
-
-from sqlstrainer.mapper import StrainerMap  #  , ColumnEntry
+from sqlstrainer.mapper import StrainerMap
 from sqlstrainer.match import column_matcher
+from sqlstrainer.schema import FilterFieldSchema
+
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 def _any_to_many(v):
@@ -69,7 +68,7 @@ class NestablePath(object):
     flags = None
 
     def __init__(self, base, name=None):
-        # TODO: Fix include/path functionality
+        # TODO: handle flags
         self.base = base
         self._name = name
         self._paths = []
@@ -85,17 +84,36 @@ class NestablePath(object):
     def paths(self):
         return self._paths
 
-    def __getitem__(self, entry):
-        # if not isinstance(entry, ColumnEntry):
-        #     raise TypeError('{0} expected for key, {1} found'.format(ColumnEntry, type(entry)))
+    def get(self, item, default=None):
+        if '.' not in item:
+            item = self.base.entity.__tablename__ + '.' + item
+        entry = self._dbmap.get(item)
+        if entry:
+            for group in self.all:
+                if group.base == entry.mapper:
+                    if entry.column in group._exclude: # todo: should check entire exclude chain
+                        return default
+                    return entry.column
 
-        for group in self.all:
-            if group.base == entry.mapper:
-                if entry.column in group._exclude:
-                    raise KeyError(entry)
-                return entry.column
+        return default
 
-        raise KeyError(entry)
+    def to_path(self, column):
+        # todo: handle dotted relationships
+        stack = [self]
+        path = []
+        while stack:
+            group = stack.pop()
+            path.append(group)
+            if group.base == column.mapper:
+                return path
+
+            for child in reversed(group._paths):
+                stack.append(child)
+
+            if group == path[-1]:
+                path.pop()
+
+        return path
 
     def exclude(self):
         return self._exclude
@@ -106,11 +124,16 @@ class NestablePath(object):
         while stack:
             group = stack.pop()
             yield group
-            for child in reversed(group._path):
+            for child in reversed(group._paths):
                 stack.append(child)
 
+    def nest(self, base):
+        path = NestablePath(base)
+        self._paths.append(path)
+        return path
 
-_logical_operations = {
+
+logical_operations = {
     'any': lambda x, y: x | y,
     'all': lambda x, y: x & y,
 }
@@ -157,11 +180,13 @@ class Strainer(object):
         self._columns = None
 
     def __getitem__(self, item):
-        entry = self._dbmap.get(str(item))
-        if not entry:
-            entry = self._dbmap[self._group.base.entity.__tablename__ + '.' + item]
-        return self._group[entry]
+        val = self.get(item, None)
+        if val is None:
+            raise KeyError(item)
+        return val
 
+    def get(self, item, default=None):
+        return self._group.get(item, default)
 
     @property
     def columns(self):
@@ -207,28 +232,15 @@ class Strainer(object):
         """Strict Mode : when true, errors raise exceptions, otherwise skip errors"""
         return self._strict
 
-    def add_path(self, *path):
-        path = list(path)
-        destination = path[-1]
-        path.insert(0, self.mapper)
-        self.routes[destination] = self.dbmap.join_path(path)
-
-    def add_clause(self, obj, clause):
-        mapper = self.dbmap.to_mapper(obj)
-        self.options[mapper] = clause
-
-    def add_value(self, data):
-        raise NotImplemented
-
     def strain(self, data):
         """builds the filter for the given set of data
 
         data format::
 
-            {
-             'column_name1': {'action': 'contains', 'value': ['a','b'], 'find': 'any' },
+            [
+             { name: 'column_name1', 'action': 'contains', 'value': ['a','b'], 'find': 'any' },
              'column_name2': {'action': 'lt', 'value': 37 }
-            }
+            ]
 
         * **name: Column Name**
 
@@ -244,35 +256,25 @@ class Strainer(object):
         :param data: list of data to filter on
         :raises Error: when strict mode is enabled
         """
-        self._filters = []
-        self._columns = []
-        for name, item in data.iteritems():
-            try:
-                column = self[name]
-                action = item.get('action', 'contains')
-                column_filter = column_matcher(column, action)
-                values = item.get('values', None)
-                if values is None:
-                    f = column_filter(column, None)
-                else:
-                    logic_op = _logical_operations[item.get('find', 'any').lower()]
-                    f = reduce(logic_op, (column_filter(column, x) for x in _any_to_many(values)))
-                self._filters.append(f)
-            except Exception as e:
-                if self._strict:
-                    raise e
-                else:
-                    continue
+        filters, errors = FilterFieldSchema(self).load(data)
+        if errors:
+            raise AttributeError(errors)
+        self._filters = filters
 
     def apply(self, query):
         if not self._filters:
             return query
-        if self.restrictive:
-            query = query.filter(*self._filters)
+        filters = []
+        join = []
+        for column, filter in self._filters:
+            if not column.mapper == self.group.base:
+                join.append(self.group.to_path(column))
+
+            query = query.filter(*[f for _, f in self._filters])
             if self._columns:
                 query = query.join(*self.join)
         else:
-            query = query.filter(reduce(_logical_operations['any'], self._filters))
+            query = query.filter(reduce(logical_operations['any'], self._filters))
             if self._columns:
                 query = query.outerjoin(*self.join).distinct()
         return query

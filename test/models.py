@@ -260,6 +260,7 @@ def dump(session):
             outcsv.writerow(list(row))
     outfile.close()
 
+
 class CustomerSchema(BaseSchema):
     first_name = StringFilterSchema()
     middle_name = StringFilterSchema()

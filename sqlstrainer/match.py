@@ -103,6 +103,12 @@ matchers = {
 }
 
 
+def get_matchers(column):
+    for col_type in getmro(type(column.type)):
+        if col_type in matchers:
+            return matchers[col_type]
+
+
 def column_matcher(column=None, action='contains'):
     """matches a column to and action to a callable
 
@@ -112,10 +118,7 @@ def column_matcher(column=None, action='contains'):
 
     match_type = None
     if column is not None:
-        for col_type in getmro(type(column.type)):
-            if col_type in matchers:
-                match_type = matchers[col_type]
-                break
+        match_type = get_matchers(column)
 
     if match_type is None:
         match_type = _default

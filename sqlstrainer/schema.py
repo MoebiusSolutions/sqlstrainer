@@ -1,5 +1,7 @@
+from sqlstrainer.strainer import logical_operations
+
 __author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
-import match
+from match import column_matcher
 from marshmallow import Schema
 from marshmallow import fields
 
@@ -17,39 +19,40 @@ def _preprocess_filter(schema, in_data):
     return in_data
 
 
-class BaseSchema(Schema):
+class FilterFieldSchema(Schema):
     __preprocessors__ = [_preprocess_filter]
 
-    # def __init__(self, *args, **kwargs):
-    #     kwargs.setdefault('many', True)
-    #     super(BaseSchema, self).__init__(*args, **kwargs)
+    def __init__(self, strainer, *args, **kwargs):
+        self._strainer = strainer
+        kwargs.setdefault('many', True)
+        super(FilterFieldSchema, self).__init__(*args, **kwargs)
 
-    def dump(self, obj, many=None, update_fields=False, **kwargs):
-        return super(BaseSchema, self).dump(obj, many, update_fields, **kwargs)
-
-
-class FilterFieldSchema(BaseSchema):
+    # todo: validate column name
+    name = fields.String(required=True)
     find = fields.Select(['any', 'all'], default='any')
-    values = fields.List(fields.Str)
-    action = fields.Select(match._default.keys(), default='contains')
+    # todo: validator for values
+    values = fields.List(fields.String, allow_none=True)
+    action = fields.String(default='contains')
     not_ = fields.Bool(default=False, attribute='not')
 
-
-class NumberFilterFieldSchema(FilterFieldSchema):
-    values = fields.List(fields.Int)
-    action = fields.Select(match._numeric.keys(), default='is')
-
-
-class StringFilterFieldSchema(FilterFieldSchema):
-    values = fields.List(fields.Str)
-    action = fields.Select(match._string.keys(), default='contains')
-
-
-class DateTimeFilterFieldSchema(FilterFieldSchema):
-    values = fields.List(fields.DateTime)
-    action = fields.Select(match._datetime.keys(), default='ibound')
+    """ :returns tuple(column, filter)"""
+    def make_object(self, data):
+        column = self._strainer[data['name']]
+        column_filter = column_matcher(column, data['action'])
+        values = data['values']
+        if values is None:
+            f = column_filter(column, None)
+        else:
+            f = reduce(logical_operations[data['find']], (column_filter(column, x) for x in values))
+        return column, f
 
 
-StringFilterSchema = lambda *args, **kwargs: fields.Nested(StringFilterFieldSchema, *args, **kwargs)
-DateTimeFilterSchema = lambda *args, **kwargs: fields.Nested(DateTimeFilterFieldSchema, *args, **kwargs)
-NumberFilterSchema = lambda *args, **kwargs: fields.Nested(NumberFilterFieldSchema, *args, **kwargs)
+@FilterFieldSchema.validator
+def validate_filter(schema, data):
+    strainer = schema._strainer
+    col = strainer.get(data['name'])
+    if col is None:
+        return False
+    if column_matcher(col, data.get('action', 'contains')) is None:
+        return False
+    return True

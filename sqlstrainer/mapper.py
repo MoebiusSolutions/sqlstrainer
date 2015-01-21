@@ -26,7 +26,7 @@ class StrainerColumn(object):
     # PROPERTY = 'property'
     # ext = COLUMN
 
-    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True, **kwargs):
+    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True, as_type=String):
         self.mapper = mapper
         self.name = name
         self._column = column
@@ -46,7 +46,7 @@ class StrainerColumn(object):
         # should not be called on property
 
     def __repr__(self):
-        return '<StrainerColumn {0}.{1}>'.format(self.mapper.class_.__tablename__, self.name)
+        return '<StrainerColumn {0}.{1}>'.format(self.mapper.entity.__tablename__, self.name)
 
 
 class StrainerMap():
@@ -93,7 +93,7 @@ class StrainerMap():
         return obj
 
     def viewable(self, mapper):
-        tbl = mapper.class_.__tablename__
+        tbl = mapper.entity.__tablename__
         for name, col in self._columns[tbl].iteritems():
             # TODO: exclude PASSWORD
             yield ('{0}.{1}'.format(tbl, name), col.label)
@@ -118,6 +118,12 @@ class StrainerMap():
         if found:
             return found[0]
         return default
+
+    def columns_of(self, obj):
+        mapper = self.to_mapper(obj)
+        columns = self._columns[mapper.entity.__tablename__]
+        for name, sc in columns.iteritems():
+            yield name, sc
 
     def get_mapper(self, tablename, default=None):
         """get a mapper based on tablename"""
@@ -211,8 +217,7 @@ class StrainerMap():
         :raises: NoPathAvailable: an element in the path missing
         """
         relations = []
-        root = self.to_mapper(path[0])
-        path = path[1:]
+        root = self.to_mapper(path.pop(0))
         children = self._relations.get(root)
         if not children:
             raise NoPathAvailable
