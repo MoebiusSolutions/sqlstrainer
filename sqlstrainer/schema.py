@@ -1,9 +1,12 @@
-from sqlstrainer.strainer import logical_operations
-
-__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 from match import column_matcher
 from marshmallow import Schema
 from marshmallow import fields
+
+
+logical_operations = {
+    'any': lambda x, y: x | y,
+    'all': lambda x, y: x & y,
+}
 
 
 def _preprocess_filter(schema, in_data):
@@ -35,16 +38,17 @@ class FilterFieldSchema(Schema):
     action = fields.String(default='contains')
     not_ = fields.Bool(default=False, attribute='not')
 
-    """ :returns tuple(column, filter)"""
+    """ :returns tuple(StrainerColumn, BooleanClause)"""
     def make_object(self, data):
-        column = self._strainer[data['name']]
-        column_filter = column_matcher(column, data['action'])
-        values = data['values']
+        entry = self._strainer[data['name']]
+        column = entry.column
+        column_filter = column_matcher(column, data.get('action', 'contains'))
+        values = data.get('values', None)
         if values is None:
             f = column_filter(column, None)
         else:
-            f = reduce(logical_operations[data['find']], (column_filter(column, x) for x in values))
-        return column, f
+            f = reduce(logical_operations[data.get('find', 'any')], (column_filter(column, x) for x in values))
+        return entry, f
 
 
 @FilterFieldSchema.validator
@@ -53,6 +57,6 @@ def validate_filter(schema, data):
     col = strainer.get(data['name'])
     if col is None:
         return False
-    if column_matcher(col, data.get('action', 'contains')) is None:
+    if column_matcher(col.column, data.get('action', 'contains')) is None:
         return False
     return True

@@ -12,7 +12,6 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Date, DECIMAL, func,
 from sqlalchemy import orm
 from sqlalchemy.ext.declarative import declarative_base, declared_attr
 from sqlalchemy.orm import backref
-from sqlstrainer.schema import BaseSchema, StringFilterSchema, NumberFilterSchema
 from sqlstrainer.strainer import strainer_property
 from sqlstrainer.view import viewable
 
@@ -260,10 +259,4 @@ def dump(session):
             outcsv.writerow(list(row))
     outfile.close()
 
-
-class CustomerSchema(BaseSchema):
-    first_name = StringFilterSchema()
-    middle_name = StringFilterSchema()
-    last_name = StringFilterSchema()
-    current_balance = NumberFilterSchema()
 

@@ -7,28 +7,10 @@
 from sqlalchemy.ext.hybrid import hybrid_property
 from six import string_types
 from sqlstrainer.mapper import StrainerMap
-from sqlstrainer.match import column_matcher
-from sqlstrainer.schema import FilterFieldSchema
+from sqlstrainer.schema import FilterFieldSchema, logical_operations
 
-__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
-
-def _any_to_many(v):
-    """list generator for any input: text, numeric or iterable
-
-    wrapped in list produces:
-        None -> [], 'test'->['test'], 123 -> [123], (1,2,3) -> [1,2,3]
-    """
-    if v is None:
-        raise StopIteration
-    if isinstance(v, string_types):
-        yield v
-    else:
-        try:
-            for value in iter(v):
-                yield value
-        except TypeError:
-            yield v
-
+"""strainer map"""
+strainer_map = None
 
 def strainer_property(**info):
     """very simple decorator to markup hybrid_property with info similar to Column(info={})
@@ -84,18 +66,15 @@ class NestablePath(object):
     def paths(self):
         return self._paths
 
-    def get(self, item, default=None):
+    def get(self, item):
         if '.' not in item:
             item = self.base.entity.__tablename__ + '.' + item
-        entry = self._dbmap.get(item)
+        entry = strainer_map.get(item)
         if entry:
             for group in self.all:
                 if group.base == entry.mapper:
-                    if entry.column in group._exclude: # todo: should check entire exclude chain
-                        return default
-                    return entry.column
-
-        return default
+                    if entry.column not in group._exclude: # todo: should check entire exclude chain
+                        return entry
 
     def to_path(self, column):
         # todo: handle dotted relationships
@@ -133,18 +112,11 @@ class NestablePath(object):
         return path
 
 
-logical_operations = {
-    'any': lambda x, y: x | y,
-    'all': lambda x, y: x & y,
-}
-
-
 class Strainer(object):
     """Strainer is ...
 
     >>> strainer = Strainer(User)
     """
-    _dbmap = None
     _strict = False
     _filters = None
     _columns = None
@@ -153,23 +125,19 @@ class Strainer(object):
     VIEW_DISTINCT = 1
     VIEW_NESTED = 2
 
-    def __init__(self, base, dbmap=None, strict=False, all_relatives=False):
+    def __init__(self, base, strict=False, all_relatives=False):
         """
         :param base: base entity - all joins originate from here
         :type base: Declarative or Mapper
-        :param dbmap: DBMap (if empty, a default DBMap will be created)
-        :type dbmap: :class:`sqlstrainer.mapper.DBMap`
         :param strict: Strict Mode : errors raise exceptions, default skip errors
         :type strict: bool
         """
-
-        if self.__class__._dbmap is None:
-            dbmap = StrainerMap()
-        self.__class__._dbmap = dbmap
-        mapper = dbmap.to_mapper(base)
+        global strainer_map
+        strainer_map = StrainerMap()
+        mapper = strainer_map.to_mapper(base)
         self._group = NestablePath(mapper)
         if all_relatives:
-            relatives = dbmap.all_relatives(mapper)
+            relatives = strainer_map.all_relatives(mapper)
             for relative, paths in relatives.iteritems():
                 shortest_path = sorted(paths, key=lambda sp: len(sp))[0]
                 self.group.paths.append(shortest_path[0].property)
@@ -180,13 +148,10 @@ class Strainer(object):
         self._columns = None
 
     def __getitem__(self, item):
-        val = self.get(item, None)
-        if val is None:
-            raise KeyError(item)
-        return val
+        return self.get(item)
 
-    def get(self, item, default=None):
-        return self._group.get(item, default)
+    def get(self, item):
+        return self._group.get(item)
 
     @property
     def columns(self):
@@ -196,28 +161,28 @@ class Strainer(object):
             mappers.add(group.base)
             exclude_objs.update(group.exclude)
             for path in group.paths:
-                target = self._dbmap.to_mapper(path[-1])
+                target = strainer_map.to_mapper(path[-1])
                 mappers.add(target)
         exclude = set()
         for obj in exclude_objs:
             if isinstance(obj, string_types):
                 if '.' in obj:
-                    column = self._dbmap.get(obj)
+                    column = strainer_map.get(obj)
                     if column is not None:
                         exclude.add(column)
                 else:
-                    mapper = self._dbmap.get_mapper(obj)
-                    for name, column in self._dbmap.columns_of(mapper):
+                    mapper = strainer_map.get_mapper(obj)
+                    for name, column in strainer_map.columns_of(mapper):
                         exclude.add(column)
             else:
-                mapper = self._dbmap.to_mapper(obj)
+                mapper = strainer_map.to_mapper(obj)
                 if getattr(mapper, 'is_mapper', False):
-                    for name, column in self._dbmap.columns_of(mapper):
+                    for name, column in strainer_map.columns_of(mapper):
                         exclude.add(column)
 
         columns = set()
         for mapper in mappers:
-            for name, column in self._dbmap.columns_of(mapper):
+            for name, column in strainer_map.columns_of(mapper):
                 columns.add(column)
 
         return columns - exclude
@@ -267,17 +232,19 @@ class Strainer(object):
         filters = []
         join = []
         for column, filter in self._filters:
+            filters.append(filter)
             if not column.mapper == self.group.base:
                 join.append(self.group.to_path(column))
 
-            query = query.filter(*[f for _, f in self._filters])
-            if self._columns:
-                query = query.join(*self.join)
+        if self.restrictive:
+            query = query.filter(*filters)
+            if join:
+                query = query.join(*join)
         else:
-            query = query.filter(reduce(logical_operations['any'], self._filters))
-            if self._columns:
-                query = query.outerjoin(*self.join).distinct()
-        return query
+            query = query.filter(reduce(logical_operations['any'], filters))
+            if join:
+                query = query.outerjoin(*self.join)
+        return query.distinct()
 
 
 class StrainerMixin(object):

@@ -29,16 +29,13 @@ def teardown():
 
 
 def test_something(strainer):
-    args = {
-        'first_name': {'values': ['b', 'c', 'd'] }
-        }
-    f, err = m.CustomerSchema().load(args)
-    assert (not err)
-    strainer.strain(f)
+    args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] } ]
+    strainer.strain(args)
     q = session.query(m.Customer)
     c1 = q.count()
     q = strainer.apply(q)
     c2 = q.count()
+    print c1, c2
     assert(c1 > c2)
 
 

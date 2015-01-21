@@ -12,8 +12,6 @@ from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.ext.hybrid import hybrid_property
 
-__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
-
 
 class NoPathAvailable(Exception):
     """Relationship path does not exist"""
@@ -26,7 +24,7 @@ class StrainerColumn(object):
     # PROPERTY = 'property'
     # ext = COLUMN
 
-    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True, as_type=String):
+    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True):
         self.mapper = mapper
         self.name = name
         self._column = column
