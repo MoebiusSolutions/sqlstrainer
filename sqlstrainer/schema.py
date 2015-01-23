@@ -1,4 +1,4 @@
-from match import column_matcher
+from sqlstrainer.match import column_matcher, deserialize_value_for_column
 from marshmallow import Schema, UnmarshallingError, ValidationError
 from marshmallow import fields
 import sqlalchemy as sa
@@ -59,7 +59,6 @@ class StrainerSchema(Schema):
         data['filter'] = f
         return data
 
-from match import deserialize_value_for_column
 
 @StrainerSchema.validator
 def validate_filter(schema, data):

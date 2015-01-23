@@ -6,6 +6,7 @@
 .. autoclass:: ColumnEntry
     :members:
 """
+from six import iteritems, string_types
 from sqlalchemy import inspect
 from sqlalchemy.orm import _mapper_registry
 from sqlalchemy.orm.attributes import InstrumentedAttribute
@@ -62,8 +63,12 @@ class StrainerMap():
         self._columns = {}
         self._relations = {}
         # filters non-primary entries
-        for mapper, _ in filter(lambda x: x[1], registry.iteritems()):
-            self._relations[mapper] = dict((rprop.class_attribute, rprop.mapper) for rprop in mapper.relationships)
+        for mapper, _ in filter(lambda x: x[1], iteritems(registry)):
+            for rprop in mapper.relationships:
+                rels = self._relations.setdefault(mapper, {})
+                rels[rprop.class_attribute] = rprop.mapper# .self_and_descendants
+            # Todo: add polymorphic relations
+
             cls = mapper.class_
             tbl = cls.__tablename__
             model = self._columns[tbl] = {}
@@ -92,7 +97,7 @@ class StrainerMap():
 
     def viewable(self, mapper):
         tbl = mapper.entity.__tablename__
-        for name, col in self._columns[tbl].iteritems():
+        for name, col in iteritems(self._columns[tbl]):
             # TODO: exclude PASSWORD
             yield ('{0}.{1}'.format(tbl, name), col.label)
 
@@ -121,7 +126,7 @@ class StrainerMap():
     def columns_of(self, obj):
         mapper = self.to_mapper(obj)
         columns = self._columns[mapper.entity.__tablename__]
-        for name, sc in columns.iteritems():
+        for name, sc in iteritems(columns):
             yield name, sc
 
     def get_mapper(self, tablename, default=None):
@@ -161,7 +166,7 @@ class StrainerMap():
         while stack:
             parent, root = stack.pop()
             children = self._relations.get(parent)
-            for relationship, mapper in children.iteritems():
+            for relationship, mapper in iteritems(children):
                 path = root + [relationship]
                 if mapper not in relatives:
                     stack.append((mapper, path))
@@ -199,10 +204,26 @@ class StrainerMap():
             return find
         # handle models or mappers
         find = cls.to_mapper(find)
-        for relationship, mapper in relations.iteritems():
+        for relationship, mapper in iteritems(relations):
             if mapper == find:
                 return relationship
         return None
+
+    @classmethod
+    def polymorphic_relation(cls, base, find):
+        """takes a list of relations and finds the first one that matches
+
+        :param base: a base mapper
+        :param find: the child to find (String, Mapper, Model, Relationship)
+        :return: first mapper to match
+        """
+        if isinstance(find, string_types):
+            return base.polymorphic_map.get(find, None)
+
+        find = cls.to_mapper(find)
+        for child in base.polymorphic_iterator():
+            if find == child:
+                return child
 
     def join_path(self, path):
         """Converts a list of models into a list of relationships which can be used in a join
@@ -222,10 +243,14 @@ class StrainerMap():
             raise NoPathAvailable
         for o in path:
             r = self.first_relation(children, o)
-            if not r:
-                raise NoPathAvailable
-            relations.append(r)
-            root = children.get(r)
+            if r:
+                relations.append(r)
+                root = children.get(r)
+            else:
+                root = self.polymorphic_relation(root, o)
+                if not root:
+                    raise NoPathAvailable
+                relations.append(root) # mapper, not relationship.. will work in join?
             children = self._relations.get(root)
             if not children:
                 raise NoPathAvailable
@@ -249,9 +274,14 @@ class StrainerMap():
         join = []
 
         for name in path:
-            relations = filter(lambda r: r.key == name, self._relations[mapper])
-            if len(relations) != 1:
-                raise NoPathAvailable(dottedPath)
-            join.append(relations[0])
-            mapper = self.to_mapper(relations[0])
+            relations = list(filter(lambda r: r.key == name, self._relations[mapper]))
+            if len(relations) == 1:
+                join.append(relations[0])
+                mapper = self.to_mapper(relations[0])
+            else:
+                child = self.polymorphic_relation(mapper, name)
+                if not child:
+                    raise NoPathAvailable(dottedPath)
+                join.append(child)
+                mapper = child
         return join
