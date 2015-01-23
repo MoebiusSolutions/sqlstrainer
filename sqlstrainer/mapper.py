@@ -17,14 +17,14 @@ class NoPathAvailable(Exception):
     """Relationship path does not exist"""
 
 
-class StrainerColumn(object):
+class _StrainerColumn(object):
     """Simple class to hold mapper and column data"""
     # COLUMN = 'column'
     # HYBRID = 'hybrid'
     # PROPERTY = 'property'
     # ext = COLUMN
 
-    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True):
+    def __init__(self, mapper, name, column, label=None, viewable=True, filterable=True, **other_info):
         self.mapper = mapper
         self.name = name
         self._column = column
@@ -40,7 +40,7 @@ class StrainerColumn(object):
         if isinstance(self._column, InstrumentedAttribute):
             return self._column
         if isinstance(self._column, hybrid_property):
-            return getattr(self.mapper.class_, self.name)
+            return getattr(self.mapper.entity, self.name)
         # should not be called on property
 
     def __repr__(self):
@@ -79,7 +79,7 @@ class StrainerMap():
                         info = o.fget.info
                     else:
                         continue
-                    model[key] = StrainerColumn(mapper, key, o, **info)
+                    model[key] = _StrainerColumn(mapper, key, o, **info)
 
     def __contains__(self, item):
         self.get(item) is not None
@@ -98,8 +98,9 @@ class StrainerMap():
 
     def get(self, item, default=None):
         """Fetch a Mapper, StrainerColumn or Relationship based on string key"""
+        # TODO: handle receiving columns and hybrids and returning StrainerColumn for exclude
         parts = item.split('.')
-        found = filter(lambda m: m.class_.__tablename__ == parts[0], self._relations.keys())
+        found = filter(lambda m: m.entity.__tablename__ == parts[0], self._relations.keys())
         if not found:
             return default
         mapper = found[0]
@@ -126,9 +127,8 @@ class StrainerMap():
     def get_mapper(self, tablename, default=None):
         """get a mapper based on tablename"""
         for mapper in self._relations:
-            for table in mapper.tables:
-                if table.name == tablename:
-                    return mapper
+            if mapper.entity.__tablename__ == tablename:
+                return mapper
         return default
 
     @staticmethod
@@ -207,15 +207,16 @@ class StrainerMap():
     def join_path(self, path):
         """Converts a list of models into a list of relationships which can be used in a join
 
-        Returns None if any element of the path is not part of a join path
-
         :param path: list of models, mappers or relationships
         :return: list of relationships
         :rtype: list
         :raises: NoPathAvailable: an element in the path missing
         """
+
         relations = []
         root = self.to_mapper(path.pop(0))
+        if not path:
+            raise NoPathAvailable
         children = self._relations.get(root)
         if not children:
             raise NoPathAvailable
@@ -231,7 +232,7 @@ class StrainerMap():
         return relations
 
     def relations_of(self, mapper):
-        """Lists the relations that are available after join path
+        """Lists the relations that are available for a mapper
 
         :param path: list of models, mappers or relationships
         :return: list of relationships
@@ -239,3 +240,18 @@ class StrainerMap():
         """
         return self._relations[mapper]
 
+    def join_from_dotted(self, dottedPath):
+        path = dottedPath.split('.')
+        if len(path) < 2:
+            raise AttributeError(dottedPath)
+
+        mapper = self.get_mapper(path.pop(0))
+        join = []
+
+        for name in path:
+            relations = filter(lambda r: r.key == name, self._relations[mapper])
+            if len(relations) != 1:
+                raise NoPathAvailable(dottedPath)
+            join.append(relations[0])
+            mapper = self.to_mapper(relations[0])
+        return join

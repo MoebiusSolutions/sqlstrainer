@@ -7,10 +7,10 @@
 from sqlalchemy.ext.hybrid import hybrid_property
 from six import string_types
 from sqlstrainer.mapper import StrainerMap
-from sqlstrainer.schema import FilterFieldSchema, logical_operations
+from sqlstrainer.schema import StrainerSchema, logical_operations
 
 """strainer map"""
-strainer_map = None
+_dbmap = None
 
 def strainer_property(**info):
     """very simple decorator to markup hybrid_property with info similar to Column(info={})
@@ -38,78 +38,38 @@ def strainer_property(**info):
     return decorator
 
 
-class NestablePath(object):
-    _name = None
-    base = None
+class _StrainerJoin(object):
+    """Local helper class to hold join info
+    """
 
-    _paths = None
-
-    """list of excluded columns, mappers or relations"""
-    _exclude = None
-
-    flags = None
-
-    def __init__(self, base, name=None):
-        # TODO: handle flags
-        self.base = base
+    def __init__(self, name, base, join, flags):
+        self._base = base
         self._name = name
-        self._paths = []
-        self._exclude = []
+        self._mapper = _dbmap.to_mapper(join[-1])
+        self._flags = flags
+        self._join = join
+
+    def field_name(self, column):
+        return self.tablename + '.' + column.split('.')[-1]
+
+    def alias_name(self, column):
+        return self._name + '.' + column.split('.')[-1]
+
+    @property
+    def tablename(self):
+        return self._mapper.entity.__tablename__
 
     @property
     def name(self):
-        if not self._name:
-            self._name = self.base.class_.__name__
         return self._name
 
     @property
-    def paths(self):
-        return self._paths
-
-    def get(self, item):
-        if '.' not in item:
-            item = self.base.entity.__tablename__ + '.' + item
-        entry = strainer_map.get(item)
-        if entry:
-            for group in self.all:
-                if group.base == entry.mapper:
-                    if entry.column not in group._exclude: # todo: should check entire exclude chain
-                        return entry
-
-    def to_path(self, column):
-        # todo: handle dotted relationships
-        stack = [self]
-        path = []
-        while stack:
-            group = stack.pop()
-            path.append(group)
-            if group.base == column.mapper:
-                return path
-
-            for child in reversed(group._paths):
-                stack.append(child)
-
-            if group == path[-1]:
-                path.pop()
-
-        return path
-
-    def exclude(self):
-        return self._exclude
+    def flags(self):
+        return self._flags
 
     @property
-    def all(self):
-        stack = [self]
-        while stack:
-            group = stack.pop()
-            yield group
-            for child in reversed(group._paths):
-                stack.append(child)
-
-    def nest(self, base):
-        path = NestablePath(base)
-        self._paths.append(path)
-        return path
+    def join(self):
+        return self._join
 
 
 class Strainer(object):
@@ -117,87 +77,50 @@ class Strainer(object):
 
     >>> strainer = Strainer(User)
     """
-    _strict = False
-    _filters = None
-    _columns = None
 
     restrictive = True
     VIEW_DISTINCT = 1
     VIEW_NESTED = 2
 
-    def __init__(self, base, strict=False, all_relatives=False):
+    def __init__(self, base, strict=False):
         """
         :param base: base entity - all joins originate from here
         :type base: Declarative or Mapper
         :param strict: Strict Mode : errors raise exceptions, default skip errors
         :type strict: bool
         """
-        global strainer_map
-        strainer_map = StrainerMap()
-        mapper = strainer_map.to_mapper(base)
-        self._group = NestablePath(mapper)
-        if all_relatives:
-            relatives = strainer_map.all_relatives(mapper)
-            for relative, paths in relatives.iteritems():
-                shortest_path = sorted(paths, key=lambda sp: len(sp))[0]
-                self.group.paths.append(shortest_path[0].property)
-
-        self.options = {}
-        self._strict = strict
+        global _dbmap
+        if not _dbmap:
+            _dbmap = StrainerMap()
+        self._relatives = {}
+        self._base = _dbmap.to_mapper(base)
         self._filters = None
-        self._columns = None
-
-    def __getitem__(self, item):
-        return self.get(item)
+        self._exclude = set()
 
     def get(self, item):
-        return self._group.get(item)
+        # todo: handle alias
+        tbl, name = self.split_name(item)
+
+        if tbl != self.tablename:
+            path = self._relatives[tbl].join
+            tbl = _dbmap.to_mapper(path[-1]).entity.__tablename__
+
+        return _dbmap[tbl + '.' + name]
 
     @property
-    def columns(self):
-        mappers = set()
-        exclude_objs = set()
-        for group in self.group.all:
-            mappers.add(group.base)
-            exclude_objs.update(group.exclude)
-            for path in group.paths:
-                target = strainer_map.to_mapper(path[-1])
-                mappers.add(target)
-        exclude = set()
-        for obj in exclude_objs:
-            if isinstance(obj, string_types):
-                if '.' in obj:
-                    column = strainer_map.get(obj)
-                    if column is not None:
-                        exclude.add(column)
-                else:
-                    mapper = strainer_map.get_mapper(obj)
-                    for name, column in strainer_map.columns_of(mapper):
-                        exclude.add(column)
-            else:
-                mapper = strainer_map.to_mapper(obj)
-                if getattr(mapper, 'is_mapper', False):
-                    for name, column in strainer_map.columns_of(mapper):
-                        exclude.add(column)
+    def tablename(self):
+        return self._base.entity.__tablename__
 
-        columns = set()
-        for mapper in mappers:
-            for name, column in strainer_map.columns_of(mapper):
-                columns.add(column)
+    def split_name(self, item):
+        parts = item.split('.')
+        if len(parts) == 2:
+            return parts
+        if len(parts) == 1:
+            return self.tablename, item
 
-        return columns - exclude
+        raise AttributeError(item)
 
-
-    @property
-    def group(self):
-        return self._group
-
-    @property
-    def strict(self):
-        """Strict Mode : when true, errors raise exceptions, otherwise skip errors"""
-        return self._strict
-
-    def strain(self, data):
+    def load(self, data):
         """builds the filter for the given set of data
 
         data format::
@@ -221,7 +144,7 @@ class Strainer(object):
         :param data: list of data to filter on
         :raises Error: when strict mode is enabled
         """
-        filters, errors = FilterFieldSchema(self).load(data)
+        filters, errors = StrainerSchema(self).load(data)
         if errors:
             raise AttributeError(errors)
         self._filters = filters
@@ -230,21 +153,54 @@ class Strainer(object):
         if not self._filters:
             return query
         filters = []
-        join = []
-        for column, filter in self._filters:
-            filters.append(filter)
-            if not column.mapper == self.group.base:
-                join.append(self.group.to_path(column))
+        tables = set()
+        basename = self.tablename
+        for f in self._filters:
+            filters.append(f['filter'])
+            tbl, _ = self.split_name(f['name'])
+            if tbl != basename:
+                tables.add(tbl)
 
+        join_type = 'join'
         if self.restrictive:
             query = query.filter(*filters)
-            if join:
-                query = query.join(*join)
         else:
             query = query.filter(reduce(logical_operations['any'], filters))
-            if join:
-                query = query.outerjoin(*self.join)
+            join_type = 'outerjoin'
+            # todo: validate repeated join relations act as set
+
+        for tbl in tables:
+            query = getattr(query, join_type)(*self._relatives[tbl].join)
+            flags = self._relatives[tbl].flags
+            if flags:
+                query = query.filter(*flags)
+
         return query.distinct()
+
+    def relate(self, name, path, flags=None, exclude=None):
+        if isinstance(path, string_types):
+            parts = path.split('.')
+            if not parts[0] == self.tablename:
+                path = self.tablename + '.' + path
+            join = _dbmap.join_from_dotted(path)
+        else:
+            mapper = _dbmap.to_mapper(path[0])
+            if mapper is not self._base:
+                path.insert(0, self._base)
+            join = _dbmap.join_path(path)
+
+        self._relatives[name] = _StrainerJoin(name, self._base, join, flags)
+        if exclude:
+            self.exclude(exclude)
+
+    def exclude(self, *args):
+        if args:
+            exclude = args
+            if len(exclude) == 1 and isinstance(exclude[0], (list, tuple)):
+                exclude = exclude[0]
+            for field in exclude:
+                self._exclude.add(_dbmap[field])
+        return self._exclude
 
 
 class StrainerMixin(object):

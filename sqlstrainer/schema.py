@@ -1,6 +1,7 @@
 from match import column_matcher
-from marshmallow import Schema
+from marshmallow import Schema, UnmarshallingError, ValidationError
 from marshmallow import fields
+import sqlalchemy as sa
 
 
 logical_operations = {
@@ -9,6 +10,7 @@ logical_operations = {
 }
 
 
+# deprecated
 def _preprocess_filter(schema, in_data):
     keys = list(in_data.keys())
     for key in keys:
@@ -22,15 +24,15 @@ def _preprocess_filter(schema, in_data):
     return in_data
 
 
-class FilterFieldSchema(Schema):
-    __preprocessors__ = [_preprocess_filter]
+class StrainerSchema(Schema):
 
     def __init__(self, strainer, *args, **kwargs):
         self._strainer = strainer
         kwargs.setdefault('many', True)
-        super(FilterFieldSchema, self).__init__(*args, **kwargs)
+# todo: make_object gets called unless strict is true..
+#        kwargs['strict'] = True # must be strict!
+        super(StrainerSchema, self).__init__(*args, **kwargs)
 
-    # todo: validate column name
     name = fields.String(required=True)
     find = fields.Select(['any', 'all'], default='any')
     # todo: validator for values
@@ -40,23 +42,58 @@ class FilterFieldSchema(Schema):
 
     """ :returns tuple(StrainerColumn, BooleanClause)"""
     def make_object(self, data):
-        entry = self._strainer[data['name']]
-        column = entry.column
-        column_filter = column_matcher(column, data.get('action', 'contains'))
+        # todo: this gets called even when there are errors, unless strict is set
+        try:
+            entry = self._strainer.get(data['name'])
+            column = entry.column
+            column_filter = column_matcher(column, data.get('action', 'contains'))
+        except KeyError:
+            return data
         values = data.get('values', None)
-        if values is None:
+        if not values:
             f = column_filter(column, None)
         else:
             f = reduce(logical_operations[data.get('find', 'any')], (column_filter(column, x) for x in values))
-        return entry, f
+        if data.get('not_'):
+            f = sa.not_(f)
+        data['filter'] = f
+        return data
 
+from match import deserialize_value_for_column
 
-@FilterFieldSchema.validator
+@StrainerSchema.validator
 def validate_filter(schema, data):
     strainer = schema._strainer
-    col = strainer.get(data['name'])
+    try:
+        col = strainer.get(data['name'])
+    except KeyError:
+        return False
     if col is None:
         return False
-    if column_matcher(col.column, data.get('action', 'contains')) is None:
+    action = data.get('action', 'contains')
+    try:
+        column_matcher(col.column, action)
+    except KeyError:
+        return False
+    # todo: dont hard code this!
+    if action == 'empty' or action == 'notempty':
+        return True
+
+    values = data.get('values', None)
+    if not values:
+        return False
+    try:
+        # todo: find a better way to deserialize!
+        data['values'] = map(lambda x: deserialize_value_for_column(col.column, x), values)
+    except (UnmarshallingError, ValidationError):
         return False
     return True
+
+
+class FilterValueField(fields.Field):
+    # todo: create a deserializer for values
+    def _deserialize(self, value):
+        return {
+            'required': set(),
+            'optional': set()
+        }

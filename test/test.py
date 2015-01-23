@@ -20,7 +20,10 @@ def setup():
 
 @pytest.fixture
 def strainer():
-    return Strainer(m.Customer, strict=True, all_relatives=True)
+    strainer = Strainer(m.Customer, strict=True)
+  #  strainer.group.nest(m.Customer.parent)
+    return strainer
+
 
 
 def teardown():
@@ -29,14 +32,30 @@ def teardown():
 
 
 def test_something(strainer):
-    args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] } ]
-    strainer.strain(args)
+    from sqlstrainer.mapper import StrainerMap
+    sm = StrainerMap()
+    rs = sm.relations_of(sm.to_mapper(m.Customer))
+    mm = sm.to_mapper(rs.keys()[0])
+    print rs
+    args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] }
+             ]
+    strainer.load(args)
     q = session.query(m.Customer)
     c1 = q.count()
     q = strainer.apply(q)
-    c2 = q.count()
+    c2 = strainer.apply(q).count()
     print c1, c2
     assert(c1 > c2)
+
+    args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] },
+             { 'name': 'customer_id', 'values': ['46'], 'action': 'gt' },
+             { 'name': 'parent.first_name', 'values': ['b', 'c', 'd'] }
+             ]
+#    strainer.relate('parent', 'parent')
+    strainer.load(args)
+    c3 = strainer.apply(q).count()
+    print c1, c2, c3
+    assert(c2 > c3)
 
 
 # def test_something2():
