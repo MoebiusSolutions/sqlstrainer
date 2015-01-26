@@ -2,6 +2,7 @@ from sqlstrainer.match import column_matcher, deserialize_value_for_column
 from marshmallow import Schema, UnmarshallingError, ValidationError
 from marshmallow import fields
 import sqlalchemy as sa
+from functools import reduce
 
 
 logical_operations = {

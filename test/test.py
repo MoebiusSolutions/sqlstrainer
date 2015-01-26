@@ -21,7 +21,7 @@ def setup():
 @pytest.fixture
 def strainer():
     strainer = Strainer(m.Customer, strict=True)
-  #  strainer.group.nest(m.Customer.parent)
+    strainer.relate('parent', m.Customer.parent)
     return strainer
 
 
@@ -36,15 +36,14 @@ def test_something(strainer):
     sm = StrainerMap()
     rs = sm.relations_of(sm.to_mapper(m.Customer))
     mm = sm.to_mapper(rs.keys()[0])
-    print rs
     args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] }
              ]
-    strainer.load(args)
+    st = strainer.build(args)
     q = session.query(m.Customer)
     c1 = q.count()
-    q = strainer.apply(q)
-    c2 = strainer.apply(q).count()
-    print c1, c2
+    q = st.strain(q)
+    c2 = q.count()
+
     assert(c1 > c2)
 
     args = [ { 'name': 'first_name', 'values': ['b', 'c', 'd'] },
@@ -52,9 +51,9 @@ def test_something(strainer):
              { 'name': 'parent.first_name', 'values': ['b', 'c', 'd'] }
              ]
 #    strainer.relate('parent', 'parent')
-    strainer.load(args)
-    c3 = strainer.apply(q).count()
-    print c1, c2, c3
+    st = strainer.build(args)
+    c3 = st.strain(q).count()
+
     assert(c2 > c3)
 
 

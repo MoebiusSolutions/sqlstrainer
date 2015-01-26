@@ -1,5 +1,19 @@
 """Strainer builds a filter path for a mapper/model
 
+At class level call my_model_strainer = Strainer(MyModel)
+my_model_strainer.relate('other', [MyModel.other], flags=[Other.foo == 'bar'])
+
+To use:
+strainer, errors = my_model_strainer(somedata)
+if errors:
+    handleErrors(errors)
+else:
+    query = strainer.strain(session.query(MyModel))
+
+    # To apply the same where statement to another query...
+    other_q = session.query(MyModel.id, sum(Other.value)).group_by(MyModel.id).join(MyModel.other)
+    query = strainer.strain(other_q)
+
 .. autoclass:: Strainer
     :members:
 
@@ -8,6 +22,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from six import string_types
 from sqlstrainer.mapper import StrainerMap
 from sqlstrainer.schema import StrainerSchema, logical_operations
+from functools import reduce
 
 """strainer map"""
 _dbmap = None
@@ -72,6 +87,41 @@ class _StrainerJoin(object):
         return self._join
 
 
+class StrainerFilter(object):
+
+    def __init__(self, strainer, filters):
+        self._strainer = strainer
+        self._filters = filters
+
+    def strain(self, query):
+        if not self._filters:
+            return query
+        filters = []
+        tables = set()
+        basename = self._strainer.tablename
+        for f in self._filters:
+            filters.append(f['filter'])
+            tbl, _ = self._strainer.split_name(f['name'])
+            if tbl != basename:
+                tables.add(tbl)
+
+        join_type = 'join'
+        if self._strainer.restrictive:
+            query = query.filter(*filters)
+        else:
+            query = query.filter(reduce(logical_operations['any'], filters))
+            join_type = 'outerjoin'
+            # todo: validate repeated join relations act as set
+
+        for tbl in tables:
+            query = getattr(query, join_type)(*self._strainer.relatives[tbl].join)
+            flags = self._strainer.relatives[tbl].flags
+            if flags:
+                query = query.filter(*flags)
+
+        return query.distinct()
+
+
 class Strainer(object):
     """Strainer is ...
 
@@ -89,13 +139,24 @@ class Strainer(object):
         :param strict: Strict Mode : errors raise exceptions, default skip errors
         :type strict: bool
         """
+        self._relatives = {}
+        self._base = base
+        self._filters = None
+        self._exclude = set()
+        self._to_relate = []
+        self._initialized = False
+
+    def init(self):
         global _dbmap
         if not _dbmap:
             _dbmap = StrainerMap()
-        self._relatives = {}
-        self._base = _dbmap.to_mapper(base)
-        self._filters = None
-        self._exclude = set()
+        self._base = _dbmap.to_mapper(self._base)
+        self._initialized = True
+        for r in self._to_relate:
+            self.relate(*r)
+
+    def __call__(self, *args, **kwargs):
+        return self.build(args[0])
 
     def get(self, item):
         # todo: handle alias
@@ -120,14 +181,14 @@ class Strainer(object):
 
         raise AttributeError(item)
 
-    def load(self, data):
+    def build(self, data):
         """builds the filter for the given set of data
 
         data format::
 
             [
              { name: 'column_name1', 'action': 'contains', 'value': ['a','b'], 'find': 'any' },
-             'column_name2': {'action': 'lt', 'value': 37 }
+             { name: 'column_name2', 'action': 'lt', 'value': 37 }
             ]
 
         * **name: Column Name**
@@ -144,46 +205,28 @@ class Strainer(object):
         :param data: list of data to filter on
         :raises Error: when strict mode is enabled
         """
+        if not self._initialized:
+            self.init()
         filters, errors = StrainerSchema(self).load(data)
-        if errors:
-            raise AttributeError(errors)
-        self._filters = filters
-
-    def apply(self, query):
-        if not self._filters:
-            return query
-        filters = []
-        tables = set()
-        basename = self.tablename
-        for f in self._filters:
-            filters.append(f['filter'])
-            tbl, _ = self.split_name(f['name'])
-            if tbl != basename:
-                tables.add(tbl)
-
-        join_type = 'join'
-        if self.restrictive:
-            query = query.filter(*filters)
-        else:
-            query = query.filter(reduce(logical_operations['any'], filters))
-            join_type = 'outerjoin'
-            # todo: validate repeated join relations act as set
-
-        for tbl in tables:
-            query = getattr(query, join_type)(*self._relatives[tbl].join)
-            flags = self._relatives[tbl].flags
-            if flags:
-                query = query.filter(*flags)
-
-        return query.distinct()
+        return StrainerFilter(self, filters), errors
 
     def relate(self, name, path, flags=None, exclude=None):
+        if not self._initialized:
+            self._to_relate.append((name, path, flags, exclude))
+            return
+        # todo: make an alias to name and use the alias for the column getter...
         if isinstance(path, string_types):
             parts = path.split('.')
             if not parts[0] == self.tablename:
                 path = self.tablename + '.' + path
             join = _dbmap.join_from_dotted(path)
         else:
+            # be forgiving (not sure if good/bad thing)
+            try:
+                path = list(path)
+            except TypeError:
+                path = [path]
+
             mapper = _dbmap.to_mapper(path[0])
             if mapper is not self._base:
                 path.insert(0, self._base)
@@ -201,6 +244,10 @@ class Strainer(object):
             for field in exclude:
                 self._exclude.add(_dbmap[field])
         return self._exclude
+
+    @property
+    def relatives(self):
+        return self._relatives
 
 
 class StrainerMixin(object):

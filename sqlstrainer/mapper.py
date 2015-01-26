@@ -13,7 +13,6 @@ from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.ext.hybrid import hybrid_property
 
-
 class NoPathAvailable(Exception):
     """Relationship path does not exist"""
 
@@ -67,7 +66,6 @@ class StrainerMap():
             for rprop in mapper.relationships:
                 rels = self._relations.setdefault(mapper, {})
                 rels[rprop.class_attribute] = rprop.mapper# .self_and_descendants
-            # Todo: add polymorphic relations
 
             cls = mapper.class_
             tbl = cls.__tablename__
@@ -105,7 +103,7 @@ class StrainerMap():
         """Fetch a Mapper, StrainerColumn or Relationship based on string key"""
         # TODO: handle receiving columns and hybrids and returning StrainerColumn for exclude
         parts = item.split('.')
-        found = filter(lambda m: m.entity.__tablename__ == parts[0], self._relations.keys())
+        found = list(filter(lambda m: m.entity.__tablename__ == parts[0], self._relations.keys()))
         if not found:
             return default
         mapper = found[0]
@@ -118,7 +116,7 @@ class StrainerMap():
             if col:
                 return col
 
-        found = filter(lambda r: r.key == parts[1], self._relations[mapper].keys())
+        found = list(filter(lambda r: r.key == parts[1], self._relations[mapper].keys()))
         if found:
             return found[0]
         return default
