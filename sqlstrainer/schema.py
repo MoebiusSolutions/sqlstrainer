@@ -1,15 +1,10 @@
 from sqlstrainer.match import column_matcher, deserialize_value_for_column
 from marshmallow import Schema, UnmarshallingError, ValidationError
 from marshmallow import fields
-import sqlalchemy as sa
+from sqlalchemy import or_ as sql_or, and_ as sql_and, not_ as sql_not
 from functools import reduce
 
-
-logical_operations = {
-    'any': lambda x, y: x | y,
-    'all': lambda x, y: x & y,
-}
-
+# todo: change sqlstrainer to be able to take a preprocessor
 
 # deprecated
 def _preprocess_filter(schema, in_data):
@@ -41,7 +36,7 @@ class StrainerSchema(Schema):
     action = fields.String(default='contains')
     not_ = fields.Bool(default=False, attribute='not')
 
-    """ :returns tuple(StrainerColumn, BooleanClause)"""
+    """ :returns """
     def make_object(self, data):
         # todo: this gets called even when there are errors, unless strict is set
         try:
@@ -51,12 +46,19 @@ class StrainerSchema(Schema):
         except KeyError:
             return data
         values = data.get('values', None)
+        print(values)
         if not values:
             f = column_filter(column, None)
         else:
-            f = reduce(logical_operations[data.get('find', 'any')], (column_filter(column, x) for x in values))
+            reduce = lambda *args: args[0]
+            if len(values) > 1:
+                if data.get('find', 'any') != 'any':
+                    reduce = sql_and
+                else:
+                    reduce = sql_or
+            f = reduce(*(column_filter(column, x) for x in values))
         if data.get('not_'):
-            f = sa.not_(f)
+            f = sql_not(f)
         data['filter'] = f
         return data
 
@@ -84,7 +86,7 @@ def validate_filter(schema, data):
         return False
     try:
         # todo: find a better way to deserialize!
-        data['values'] = map(lambda x: deserialize_value_for_column(col.column, x), values)
+        data['values'] = list(map(lambda x: deserialize_value_for_column(col.column, x), values))
     except (UnmarshallingError, ValidationError):
         return False
     return True

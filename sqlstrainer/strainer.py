@@ -18,11 +18,11 @@ else:
     :members:
 
 """
+from sqlalchemy import or_ as sql_or
 from sqlalchemy.ext.hybrid import hybrid_property
 from six import string_types
 from sqlstrainer.mapper import StrainerMap
-from sqlstrainer.schema import StrainerSchema, logical_operations
-from functools import reduce
+from sqlstrainer.schema import StrainerSchema
 
 """strainer map"""
 _dbmap = None
@@ -109,7 +109,7 @@ class StrainerFilter(object):
         if self._strainer.restrictive:
             query = query.filter(*filters)
         else:
-            query = query.filter(reduce(logical_operations['any'], filters))
+            query = query.filter(sql_or(*filters))
             join_type = 'outerjoin'
             # todo: validate repeated join relations act as set
 

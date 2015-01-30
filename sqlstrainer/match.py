@@ -21,9 +21,6 @@ from sqlalchemy.sql.elements import ClauseElement
 from sqlalchemy.sql.sqltypes import NullType
 
 from functools import wraps
-from marshmallow import Schema, fields
-
-__author__ = 'Douglas MacDougall <douglas.macdougall@moesol.com>'
 
 # """
 # For all lambdas:
@@ -78,12 +75,13 @@ _time.update({
 })
 
 _string = {
+    'is': lambda c, d: c == d,
+    'isnot': lambda c, d: c != d,
     'contains': lambda c, d: c.ilike('%{0}%'.format(d)),
     'notcontains': lambda c, d: sa.not_(c.ilike('%{0}%'.format(d))),
     'empty': lambda c, d: sa.or_(c.is_(None), c == ''),
     'notempty': lambda c, d: sa.and_(c.isnot(None), c != ''),
 }
-_string.update(_bool)
 
 
 matchers = {
